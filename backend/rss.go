@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/net/html"
+	"net/url"
 )
 
 // XML structs for parsing
@@ -1189,4 +1190,71 @@ func runBackgroundScrape(task *ScrapingTask, feed RssFeed) {
 	})
 
 	task.SendDone(newCount)
+}
+
+// RssUrlProxyHandler proxies an external web page, injecting <base> tag and stripping security headers to bypass iframe restriction
+func RssUrlProxyHandler(c *gin.Context) {
+	targetURL := c.Query("url")
+	if targetURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url parameter is required"})
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid url: " + err.Error()})
+		return
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch URL: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read website body"})
+		return
+	}
+
+	baseURI := targetURL
+	if parsed, err := url.Parse(targetURL); err == nil {
+		baseURI = parsed.Scheme + "://" + parsed.Host + "/"
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "text/html; charset=utf-8"
+	}
+
+	if strings.Contains(strings.ToLower(contentType), "html") {
+		htmlStr := string(bodyBytes)
+		baseTag := fmt.Sprintf(`<base href="%s">`, baseURI)
+		
+		headIdx := strings.Index(strings.ToLower(htmlStr), "<head>")
+		if headIdx != -1 {
+			htmlStr = htmlStr[:headIdx+6] + baseTag + htmlStr[headIdx+6:]
+		} else {
+			htmlStr = baseTag + htmlStr
+		}
+		bodyBytes = []byte(htmlStr)
+	}
+
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.Header().Del("X-Frame-Options")
+	c.Writer.Header().Del("Content-Security-Policy")
+	c.Writer.Header().Del("X-Content-Security-Policy")
+	c.Writer.Header().Del("X-WebKit-CSP")
+	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	
+	c.Data(resp.StatusCode, contentType, bodyBytes)
 }

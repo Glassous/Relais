@@ -83,6 +83,7 @@ func main() {
 		admin.POST("/rss/feeds/:id/scrape", ScrapeRssFeedHandler)
 		admin.GET("/rss/feeds/:id/scrape-stream", ScrapeRssFeedStreamHandler)
 		admin.GET("/rss/articles", GetRssArticles)
+		admin.GET("/rss/proxy-url", RssUrlProxyHandler)
 		admin.DELETE("/rss/articles/:id", DeleteRssArticle)
 		admin.DELETE("/rss/articles", DeleteAllRssArticles)
 	}

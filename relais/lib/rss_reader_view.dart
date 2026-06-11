@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:web/web.dart' as web;
 import 'api_service.dart';
 
 class RssReaderView extends StatefulWidget {
@@ -1218,26 +1220,86 @@ class _ScrapeProgressDialogState extends State<ScrapeProgressDialog> {
   }
 }
 
-class RssArticleDetailPage extends StatelessWidget {
+class RssArticleDetailPage extends StatefulWidget {
   const RssArticleDetailPage({super.key});
 
   @override
+  State<RssArticleDetailPage> createState() => _RssArticleDetailPageState();
+}
+
+class _RssArticleDetailPageState extends State<RssArticleDetailPage> {
+  int _activeViewIndex = 0;
+  Map<String, dynamic>? _art;
+  String? _viewId;
+  bool _isViewRegistered = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_isViewRegistered) {
+      final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+      _art = args;
+      _viewId = 'iframe_proxy_${_art!['id']}';
+      
+      final proxyUrl = "${ApiService.baseUrl}/api/admin/rss/proxy-url?url=${Uri.encodeComponent(_art!['url'] ?? '')}";
+      
+      ui_web.platformViewRegistry.registerViewFactory(
+        _viewId!,
+        (int viewId) {
+          final iframe = web.document.createElement('iframe') as web.HTMLIFrameElement;
+          iframe.src = proxyUrl;
+          iframe.style.border = 'none';
+          iframe.style.width = '100%';
+          iframe.style.height = '100%';
+          return iframe;
+        },
+      );
+      _isViewRegistered = true;
+    }
+  }
+
+  Widget _buildTabButton(int index, String label) {
+    final theme = Theme.of(context);
+    final isActive = _activeViewIndex == index;
+    return OutlinedButton(
+      onPressed: () {
+        setState(() {
+          _activeViewIndex = index;
+        });
+      },
+      style: OutlinedButton.styleFrom(
+        foregroundColor: isActive ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
+        backgroundColor: isActive ? theme.colorScheme.primary : Colors.transparent,
+        side: BorderSide(color: isActive ? theme.colorScheme.primary : theme.colorScheme.onSurface.withOpacity(0.2)),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final art = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+    if (_art == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     String timeStr = "";
-    if (art['published_at'] != null) {
+    if (_art!['published_at'] != null) {
       try {
-        final parsed = DateTime.parse(art['published_at']);
+        final parsed = DateTime.parse(_art!['published_at']);
         timeStr = "${parsed.year}-${parsed.month.toString().padLeft(2, '0')}-${parsed.day.toString().padLeft(2, '0')} ${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}";
       } catch (e) {
-        timeStr = art['published_at'].toString();
+        timeStr = _art!['published_at'].toString();
       }
     }
 
-    final hasAI = art['model_used'] != null && art['model_used'] != '';
+    final hasAI = _art!['model_used'] != null && _art!['model_used'] != '';
 
     return Scaffold(
       appBar: AppBar(
@@ -1245,112 +1307,134 @@ class RssArticleDetailPage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(art['feed_name'] ?? '新闻正文', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: Text(_art!['feed_name'] ?? '新闻详情', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.launch),
             onPressed: () async {
-              final uri = Uri.tryParse(art['url'] ?? '');
+              final uri = Uri.tryParse(_art!['url'] ?? '');
               if (uri != null) {
                 await launchUrl(uri);
               }
             },
-            tooltip: "查看原文",
+            tooltip: "浏览器打开原文",
           ),
         ],
       ),
       body: SafeArea(
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 800),
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-            child: ListView(
-              children: [
-                Text(
-                  art['title'] ?? '',
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.3),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Text(
-                      timeStr,
-                      style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 13),
-                    ),
-                    const SizedBox(width: 12),
-                    if (hasAI)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          "AI: ${art['model_used']}",
-                          style: const TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                if (art['ai_summary'] != null && art['ai_summary'] != '') ...[
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.blue.withOpacity(0.08) : Colors.blue.withOpacity(0.04),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.blue.withOpacity(0.2)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+        child: Column(
+          children: [
+            // Centered Tab Buttons
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              color: theme.colorScheme.surface,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildTabButton(0, "智能总结与正文"),
+                  const SizedBox(width: 16),
+                  _buildTabButton(1, "中转网页原文"),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // View Switcher
+            Expanded(
+              child: _activeViewIndex == 0
+                  ? Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 800),
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                        child: ListView(
                           children: [
-                            const Icon(Icons.auto_awesome, color: Colors.blue, size: 18),
-                            const SizedBox(width: 8),
                             Text(
-                              "AI 总结说明",
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.blue[200] : Colors.blue[800],
-                                fontSize: 14,
+                              _art!['title'] ?? '',
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.3),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Text(
+                                  timeStr,
+                                  style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 13),
+                                ),
+                                const SizedBox(width: 12),
+                                if (hasAI)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      "AI: ${_art!['model_used']}",
+                                      style: const TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                            if (_art!['ai_summary'] != null && _art!['ai_summary'] != '') ...[
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.blue.withOpacity(0.08) : Colors.blue.withOpacity(0.04),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.auto_awesome, color: Colors.blue, size: 18),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          "AI 总结说明",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark ? Colors.blue[200] : Colors.blue[800],
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      _art!['ai_summary'],
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        height: 1.6,
+                                        color: theme.colorScheme.onSurface.withOpacity(0.9),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
+                              const SizedBox(height: 24),
+                            ],
+                            const Text(
+                              "网页正文内容",
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 12),
+                            const Divider(),
+                            const SizedBox(height: 12),
+                            Text(
+                              _art!['content'] != null && _art!['content'] != '' 
+                                  ? _art!['content'] 
+                                  : (_art!['summary'] != null && _art!['summary'] != '' ? _art!['summary'] : '暂无内容介绍'),
+                              style: const TextStyle(fontSize: 15, height: 1.7),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-                        Text(
-                          art['ai_summary'],
-                          style: TextStyle(
-                            fontSize: 14,
-                            height: 1.6,
-                            color: theme.colorScheme.onSurface.withOpacity(0.9),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-                const Text(
-                  "网页正文内容",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                const Divider(),
-                const SizedBox(height: 12),
-                Text(
-                  art['content'] != null && art['content'] != '' 
-                      ? art['content'] 
-                      : (art['summary'] != null && art['summary'] != '' ? art['summary'] : '暂无内容介绍'),
-                  style: const TextStyle(fontSize: 15, height: 1.7),
-                ),
-                const SizedBox(height: 40),
-              ],
+                      ),
+                    )
+                  : HtmlElementView(viewType: _viewId!),
             ),
-          ),
+          ],
         ),
       ),
     );
