@@ -10,12 +10,14 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/net/html"
 )
 
 // XML structs for parsing
@@ -209,9 +211,17 @@ func ScrapeFeed(feed RssFeed) error {
 			continue // skip duplicates
 		}
 
+		// Fetch full article content from target URL
+		extractedContent, err := fetchAndExtractContent(art.URL)
+		if err != nil {
+			log.Printf("Failed to fetch full article content for %s: %v", art.URL, err)
+			extractedContent = art.Summary // fallback to summary
+		}
+		art.Content = extractedContent
+
 		// Generate AI Summary if a model is mapped
 		if targetModel != nil {
-			summaryText, err := generateAISummary(targetModel, art.Title, art.Summary)
+			summaryText, err := generateAISummary(targetModel, art.Title, art.Content)
 			if err == nil && summaryText != "" {
 				art.AISummary = summaryText
 				art.ModelUsed = targetModel.CustomName
@@ -645,4 +655,538 @@ func DeleteAllRssArticles(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "All articles deleted successfully"})
+}
+
+// fetchAndExtractContent fetches the target URL and extracts clean article text
+func fetchAndExtractContent(targetURL string) (string, error) {
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("status code %d", resp.StatusCode)
+	}
+
+	doc, err := html.Parse(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var bodyText strings.Builder
+	
+	// Helper to check if node is inside script, style, nav, header, footer, form, aside, noscript
+	var checkIgnoreTags = func(n *html.Node) bool {
+		if n.Type == html.ElementNode {
+			tag := strings.ToLower(n.Data)
+			if tag == "script" || tag == "style" || tag == "nav" || tag == "header" || 
+				tag == "footer" || tag == "aside" || tag == "form" || tag == "noscript" || 
+				tag == "iframe" || tag == "button" || tag == "select" || tag == "option" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Find the <article> node first
+	var articleNode *html.Node
+	var findArticle func(*html.Node)
+	findArticle = func(n *html.Node) {
+		if n.Type == html.ElementNode && strings.ToLower(n.Data) == "article" {
+			articleNode = n
+			return
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			findArticle(c)
+			if articleNode != nil {
+				return
+			}
+		}
+	}
+	findArticle(doc)
+
+	var startNode *html.Node = doc
+	if articleNode != nil {
+		startNode = articleNode
+	}
+
+	var f func(*html.Node)
+	f = func(n *html.Node) {
+		if checkIgnoreTags(n) {
+			return
+		}
+		if n.Type == html.TextNode {
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				bodyText.WriteString(text)
+				bodyText.WriteString("\n")
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+	f(startNode)
+
+	// Clean up extra whitespace and limit length
+	lines := strings.Split(bodyText.String(), "\n")
+	var cleanedLines []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			cleanedLines = append(cleanedLines, l)
+		}
+	}
+
+	res := strings.Join(cleanedLines, "\n\n")
+	if len(res) > 15000 {
+		runes := []rune(res)
+		if len(runes) > 15000 {
+			res = string(runes[:15000]) + "..."
+		}
+	}
+
+	return res, nil
+}
+
+// generateAISummaryStream generates AI summary by streaming from provider
+func generateAISummaryStream(model *AIModel, title, content string, onChunk func(string)) (string, error) {
+	log.Printf("Requesting streaming AI summary from model: %s", model.CustomName)
+
+	promptContent := fmt.Sprintf("标题: %s\n内容: %s", title, content)
+	systemMessage := "你是一个专业的多语言新闻翻译与摘要助手。请将提供的新闻内容翻译并总结为一段精炼的简体中文摘要，字数控制在150字以内，保留核心事实与观点。无论输入内容是何种语言（如英文），最终的摘要产物必须是简体中文。"
+
+	requestBody := map[string]interface{}{
+		"model": model.ProviderModel,
+		"messages": []map[string]interface{}{
+			{"role": "system", "content": systemMessage},
+			{"role": "user", "content": promptContent},
+		},
+		"stream": true,
+	}
+
+	jsonBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", err
+	}
+
+	providerBase := strings.TrimSuffix(model.ProviderBaseURL, "/")
+	targetURL := providerBase + "/chat/completions"
+	if !strings.HasSuffix(providerBase, "/v1") && !strings.Contains(providerBase, "/chat/completions") {
+		targetURL = providerBase + "/v1/chat/completions"
+	} else if strings.Contains(providerBase, "/chat/completions") {
+		targetURL = providerBase
+	}
+
+	req, err := http.NewRequest("POST", targetURL, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+model.ProviderAPIKey)
+
+	client := &http.Client{
+		Timeout: 90 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("model provider error (status: %d): %s", resp.StatusCode, string(respBytes))
+	}
+
+	var fullSummary strings.Builder
+	reader := io.Reader(resp.Body)
+	
+	var lineBuffer []byte
+	buf := make([]byte, 1024)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			lineBuffer = append(lineBuffer, buf[:n]...)
+			for {
+				lineIdx := bytes.IndexByte(lineBuffer, '\n')
+				if lineIdx == -1 {
+					break
+				}
+				line := lineBuffer[:lineIdx]
+				lineBuffer = lineBuffer[lineIdx+1:]
+				
+				lineStr := strings.TrimSpace(string(line))
+				if lineStr == "" {
+					continue
+				}
+				if !strings.HasPrefix(lineStr, "data: ") {
+					continue
+				}
+				
+				dataPayload := strings.TrimPrefix(lineStr, "data: ")
+				if dataPayload == "[DONE]" {
+					break
+				}
+				
+				var chunk map[string]interface{}
+				if err := json.Unmarshal([]byte(dataPayload), &chunk); err == nil {
+					if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
+						if choiceMap, ok := choices[0].(map[string]interface{}); ok {
+							if delta, ok := choiceMap["delta"].(map[string]interface{}); ok {
+								if contentChunk, ok := delta["content"].(string); ok && contentChunk != "" {
+									fullSummary.WriteString(contentChunk)
+									if onChunk != nil {
+										onChunk(contentChunk)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+	}
+
+	return strings.TrimSpace(fullSummary.String()), nil
+}
+
+// ScrapingTask tracks active scraping tasks
+type ScrapingTask struct {
+	FeedID    string
+	FeedName  string
+	Status    string // "running", "completed", "failed"
+	mu        sync.Mutex
+	listeners map[chan string]bool
+}
+
+func (t *ScrapingTask) Broadcast(event string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for ch := range t.listeners {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
+}
+
+func (t *ScrapingTask) AddListener(ch chan string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.listeners[ch] = true
+}
+
+func (t *ScrapingTask) RemoveListener(ch chan string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.listeners, ch)
+}
+
+func (t *ScrapingTask) SendStatus(message string) {
+	payload, _ := json.Marshal(map[string]string{
+		"type":    "status",
+		"message": message,
+	})
+	t.Broadcast(string(payload))
+}
+
+func (t *ScrapingTask) SendArticleStart(title string) {
+	payload, _ := json.Marshal(map[string]string{
+		"type":  "article_start",
+		"title": title,
+	})
+	t.Broadcast(string(payload))
+}
+
+func (t *ScrapingTask) SendAiChunk(chunk string) {
+	payload, _ := json.Marshal(map[string]string{
+		"type":  "ai_chunk",
+		"chunk": chunk,
+	})
+	t.Broadcast(string(payload))
+}
+
+func (t *ScrapingTask) SendArticleEnd(aiSummary string) {
+	payload, _ := json.Marshal(map[string]string{
+		"type":       "article_end",
+		"ai_summary": aiSummary,
+	})
+	t.Broadcast(string(payload))
+}
+
+func (t *ScrapingTask) SendDone(newCount int) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type":      "done",
+		"new_count": newCount,
+	})
+	t.Broadcast(string(payload))
+}
+
+func (t *ScrapingTask) SendError(errMsg string) {
+	payload, _ := json.Marshal(map[string]string{
+		"type":  "error",
+		"error": errMsg,
+	})
+	t.Broadcast(string(payload))
+}
+
+var (
+	activeTasks   = make(map[string]*ScrapingTask)
+	activeTasksMu sync.Mutex
+)
+
+// ScrapeRssFeedStreamHandler is SSE endpoint for streaming scraping progress
+func ScrapeRssFeedStreamHandler(c *gin.Context) {
+	id := c.Param("id")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var feed RssFeed
+	err := RssFeedColl.FindOne(ctx, bson.M{"_id": id}).Decode(&feed)
+	cancel()
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "RSS Feed not found"})
+		return
+	}
+
+	modelIDOverride := c.Query("model_id")
+	if modelIDOverride != "" {
+		feed.ModelID = modelIDOverride
+	}
+
+	activeTasksMu.Lock()
+	task, exists := activeTasks[id]
+	if !exists {
+		task = &ScrapingTask{
+			FeedID:    id,
+			FeedName:  feed.Name,
+			Status:    "running",
+			listeners: make(map[chan string]bool),
+		}
+		activeTasks[id] = task
+		activeTasksMu.Unlock()
+
+		go runBackgroundScrape(task, feed)
+	} else {
+		activeTasksMu.Unlock()
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
+
+	listenerChan := make(chan string, 100)
+	task.AddListener(listenerChan)
+	defer func() {
+		task.RemoveListener(listenerChan)
+		close(listenerChan)
+	}()
+
+	c.SSEvent("status", "connected")
+	c.Writer.Flush()
+
+	clientGone := c.Writer.CloseNotify()
+	for {
+		select {
+		case <-clientGone:
+			return
+		case msg, ok := <-listenerChan:
+			if !ok {
+				return
+			}
+			c.SSEvent("message", msg)
+			c.Writer.Flush()
+
+			var msgMap map[string]interface{}
+			if err := json.Unmarshal([]byte(msg), &msgMap); err == nil {
+				if t, ok := msgMap["type"].(string); ok && (t == "done" || t == "error") {
+					return
+				}
+			}
+		}
+	}
+}
+
+func runBackgroundScrape(task *ScrapingTask, feed RssFeed) {
+	defer func() {
+		activeTasksMu.Lock()
+		delete(activeTasks, task.FeedID)
+		activeTasksMu.Unlock()
+	}()
+
+	task.SendStatus("正在拉取 RSS XML 数据...")
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", feed.URL, nil)
+	if err != nil {
+		task.SendError("创建请求失败: " + err.Error())
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		task.SendError("获取 RSS 链接失败: " + err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		task.SendError(fmt.Sprintf("HTTP 错误码: %d", resp.StatusCode))
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		task.SendError("读取 RSS 数据失败: " + err.Error())
+		return
+	}
+
+	var articles []RssArticle
+
+	var rss RSSFeedXML
+	if errRSS := xml.Unmarshal(bodyBytes, &rss); errRSS == nil && len(rss.Channel.Items) > 0 {
+		for _, item := range rss.Channel.Items {
+			pubTime := parsePubDate(item.PubDate)
+			articles = append(articles, RssArticle{
+				FeedID:      feed.ID,
+				FeedName:    feed.Name,
+				Title:       cleanHTML(item.Title),
+				URL:         item.Link,
+				Summary:     cleanHTML(item.Description),
+				PublishedAt: pubTime,
+				CreatedAt:   time.Now(),
+			})
+		}
+	} else {
+		var atom AtomFeedXML
+		if errAtom := xml.Unmarshal(bodyBytes, &atom); errAtom == nil && len(atom.Entries) > 0 {
+			for _, entry := range atom.Entries {
+				pubTime := parsePubDate(entry.Updated)
+				summary := entry.Summary
+				if summary == "" {
+					summary = entry.Content
+				}
+				articles = append(articles, RssArticle{
+					FeedID:      feed.ID,
+					FeedName:    feed.Name,
+					Title:       cleanHTML(entry.Title),
+					URL:         entry.Link.Href,
+					Summary:     cleanHTML(summary),
+					PublishedAt: pubTime,
+					CreatedAt:   time.Now(),
+				})
+			}
+		} else {
+			task.SendError("解析 RSS/Atom XML 失败，格式不受支持")
+			return
+		}
+	}
+
+	task.SendStatus(fmt.Sprintf("成功解析到 %d 篇文章，正在对比排重...", len(articles)))
+
+	var targetModel *AIModel
+	if feed.ModelID != "" {
+		var model AIModel
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = ModelColl.FindOne(ctx, bson.M{"_id": feed.ModelID}).Decode(&model)
+		cancel()
+		if err == nil {
+			targetModel = &model
+		} else {
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			err = ModelColl.FindOne(ctx, bson.M{"custom_name": feed.ModelID}).Decode(&model)
+			cancel()
+			if err == nil {
+				targetModel = &model
+			}
+		}
+	}
+
+	newCount := 0
+	for _, art := range articles {
+		if art.URL == "" {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		existsCount, err := RssArticleColl.CountDocuments(ctx, bson.M{"url": art.URL})
+		cancel()
+		if err == nil && existsCount > 0 {
+			continue
+		}
+
+		task.SendArticleStart(art.Title)
+
+		task.SendStatus("正在抓取网页正文...")
+		extractedContent, err := fetchAndExtractContent(art.URL)
+		if err != nil {
+			log.Printf("Failed to fetch full article content for %s: %v", art.URL, err)
+			extractedContent = art.Summary
+		}
+		art.Content = extractedContent
+
+		if targetModel != nil {
+			task.SendStatus("正在生成 AI 摘要...")
+			summaryText, err := generateAISummaryStream(targetModel, art.Title, art.Content, func(chunk string) {
+				task.SendAiChunk(chunk)
+			})
+			if err == nil && summaryText != "" {
+				art.AISummary = summaryText
+				art.ModelUsed = targetModel.CustomName
+			} else {
+				log.Printf("Failed to generate AI summary for article %s: %v", art.Title, err)
+				art.AISummary = truncateText(art.Summary, 200)
+			}
+		} else {
+			art.AISummary = truncateText(art.Summary, 200)
+		}
+
+		task.SendArticleEnd(art.AISummary)
+
+		art.ID = primitive.NewObjectID().Hex()
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		_, err = RssArticleColl.InsertOne(ctx, art)
+		cancel()
+		if err != nil {
+			log.Printf("Failed to insert article %s: %v", art.Title, err)
+		} else {
+			newCount++
+		}
+	}
+
+	task.SendStatus(fmt.Sprintf("抓取完成，共新增入库 %d 篇文章", newCount))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = RssFeedColl.UpdateOne(ctx, bson.M{"_id": feed.ID}, bson.M{
+		"$set": bson.M{
+			"last_scraped_at":  time.Now(),
+			"last_scraped_day": time.Now().Format("2006-01-02"),
+		},
+	})
+
+	task.SendDone(newCount)
 }

@@ -68,6 +68,7 @@ type RssArticle struct {
 	Title       string    `bson:"title" json:"title"`
 	URL         string    `bson:"url" json:"url"`
 	Summary     string    `bson:"summary" json:"summary"`       // original RSS summary
+	Content     string    `bson:"content" json:"content"`       // fetched full article content
 	AISummary   string    `bson:"ai_summary" json:"ai_summary"` // AI generated Simplified Chinese summary
 	ModelUsed   string    `bson:"model_used" json:"model_used"`
 	PublishedAt time.Time `bson:"published_at" json:"published_at"`

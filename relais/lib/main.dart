@@ -3,6 +3,8 @@ import 'login_page.dart';
 import 'admin_page.dart';
 import 'docs_page.dart';
 import 'api_service.dart';
+import 'rss_reader_view.dart';
+
 
 // Global Theme controller for light/dark mode
 class ThemeController {
@@ -91,6 +93,7 @@ class MyApp extends StatelessWidget {
             '/login': (context) => const LoginPage(),
             '/admin': (context) => const ProtectedAdminRoute(),
             '/docs': (context) => const DocsPage(),
+            '/rss-article-detail': (context) => const RssArticleDetailPage(),
           },
         );
       },

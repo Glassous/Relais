@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api_service.dart';
@@ -127,21 +129,21 @@ class _RssReaderViewState extends State<RssReaderView> with SingleTickerProvider
     if (confirmScrape != true) return;
 
     // Show progress dialog
-    final success = await showDialog<bool>(
+    await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
         return ScrapeProgressDialog(
+          feedId: feed['id'],
           feedName: feed['name'] ?? '',
-          onStart: () => ApiService.triggerScrape(feed['id'], modelId: selectedModelId),
+          modelId: selectedModelId,
         );
       },
     );
 
-    if (success == true) {
-      _loadFeeds();
-      _loadArticles();
-    }
+    // Refresh UI regardless of success/background running
+    _loadFeeds();
+    _loadArticles();
   }
 
   void _showFeedDialog([Map<String, dynamic>? feed]) {
@@ -408,6 +410,10 @@ class _RssReaderViewState extends State<RssReaderView> with SingleTickerProvider
     }
   }
 
+  void _readArticleContent(Map<String, dynamic> art) {
+    Navigator.pushNamed(context, '/rss-article-detail', arguments: art);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -667,22 +673,41 @@ class _RssReaderViewState extends State<RssReaderView> with SingleTickerProvider
                   ],
                 ),
                 // Actions
-                Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: () => _openArticleUrl(art['url'] ?? ''),
-                      icon: const Icon(Icons.launch, size: 14),
-                      label: const Text("查看原文", style: TextStyle(fontSize: 12)),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      ),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => _readArticleContent(art),
+                          icon: const Icon(Icons.menu_book, size: 14),
+                          label: const Text("阅读正文", style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => _openArticleUrl(art['url'] ?? ''),
+                          icon: const Icon(Icons.launch, size: 14),
+                          label: const Text("查看原文", style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                          onPressed: () => _deleteArticle(art['id']),
+                          tooltip: "删除此文章",
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
-                      onPressed: () => _deleteArticle(art['id']),
-                      tooltip: "删除此文章",
-                    ),
-                  ],
+                  ),
                 ),
               ],
             )
@@ -889,13 +914,15 @@ class _RssReaderViewState extends State<RssReaderView> with SingleTickerProvider
 }
 
 class ScrapeProgressDialog extends StatefulWidget {
+  final String feedId;
   final String feedName;
-  final Future<bool> Function() onStart;
+  final String? modelId;
 
   const ScrapeProgressDialog({
     super.key,
+    required this.feedId,
     required this.feedName,
-    required this.onStart,
+    this.modelId,
   });
 
   @override
@@ -907,82 +934,165 @@ class _ScrapeProgressDialogState extends State<ScrapeProgressDialog> {
   late DateTime _startTime;
   bool _isFinished = false;
   bool _success = false;
-  String _statusMessage = "正在初始化抓取任务...";
+  String _statusMessage = "正在启动抓取任务并建立连接...";
   List<bool> _stepsCompleted = [false, false, false, false];
   List<bool> _stepsActive = [true, false, false, false];
+
+  String _currentArticleTitle = "";
+  String _streamingSummary = "";
+
+  
+  StreamSubscription<String>? _subscription;
+  final ScrollController _scrollController = ScrollController();
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _startTime = DateTime.now();
     _startTimer();
-    _runScrape();
+    _connectToScrapeStream();
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    _timer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _startTimer() {
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 1));
-      if (!mounted || _isFinished) return false;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _isFinished) {
+        timer.cancel();
+        return;
+      }
       setState(() {
         _elapsedSeconds = DateTime.now().difference(_startTime).inSeconds;
-        _updateSimulatedSteps();
       });
-      return true;
     });
   }
 
-  void _updateSimulatedSteps() {
-    if (_elapsedSeconds >= 2 && !_stepsCompleted[0]) {
-      setState(() {
-        _stepsCompleted[0] = true;
-        _stepsActive[0] = false;
-        _stepsActive[1] = true;
-        _statusMessage = "已获取 XML，正在对比排重...";
-      });
-    }
-    if (_elapsedSeconds >= 4 && !_stepsCompleted[1]) {
-      setState(() {
-        _stepsCompleted[1] = true;
-        _stepsActive[1] = false;
-        _stepsActive[2] = true;
-        _statusMessage = "正在请求 AI 模型进行总结与翻译...";
-      });
-    }
+  void _connectToScrapeStream() {
+    _subscription = ApiService.triggerScrapeStream(widget.feedId, modelId: widget.modelId).listen(
+      (line) {
+        if (!mounted) return;
+        if (line.startsWith("data: ")) {
+          final data = line.substring(6).trim();
+          if (data == "connected") {
+            setState(() {
+              _statusMessage = "已连接至后端，开始解析 RSS 数据...";
+            });
+            return;
+          }
+          try {
+            final parsed = jsonDecode(data);
+            if (parsed is Map<String, dynamic>) {
+              final type = parsed['type'];
+              if (type == 'status') {
+                setState(() {
+                  _statusMessage = parsed['message'] ?? '';
+                  if (_statusMessage.contains("拉取") || _statusMessage.contains("XML")) {
+                    _stepsCompleted = [false, false, false, false];
+                    _stepsActive = [true, false, false, false];
+                  } else if (_statusMessage.contains("排重") || _statusMessage.contains("对比")) {
+                    _stepsCompleted = [true, false, false, false];
+                    _stepsActive = [false, true, false, false];
+                  } else if (_statusMessage.contains("正文") || _statusMessage.contains("总结")) {
+                    _stepsCompleted = [true, true, false, false];
+                    _stepsActive = [false, false, true, false];
+                  }
+                });
+              } else if (type == 'article_start') {
+                setState(() {
+                  _currentArticleTitle = parsed['title'] ?? '';
+                  _streamingSummary = "";
+                  _stepsCompleted = [true, true, false, false];
+                  _stepsActive = [false, false, true, false];
+                  _statusMessage = "正在解析并总结: $_currentArticleTitle";
+                });
+              } else if (type == 'ai_chunk') {
+                setState(() {
+                  _streamingSummary += parsed['chunk'] ?? '';
+                });
+                _scrollToBottom();
+              } else if (type == 'article_end') {
+                setState(() {
+                  _stepsCompleted = [true, true, true, false];
+                  _stepsActive = [false, false, false, true];
+                });
+              } else if (type == 'done') {
+                final newCount = parsed['new_count'] ?? 0;
+                setState(() {
+                  _isFinished = true;
+                  _success = true;
+                  _stepsCompleted = [true, true, true, true];
+                  _stepsActive = [false, false, false, false];
+                  _statusMessage = "抓取与 AI 总结成功！新增 $newCount 篇文章。";
+                });
+                _closeDelayed(true);
+              } else if (type == 'error') {
+                final errMsg = parsed['error'] ?? '';
+                setState(() {
+                  _isFinished = true;
+                  _success = false;
+                  _statusMessage = "抓取失败: $errMsg";
+                });
+                _closeDelayed(false);
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      },
+      onError: (err) {
+        if (!mounted) return;
+        setState(() {
+          _isFinished = true;
+          _success = false;
+          _statusMessage = "读取连接异常: $err";
+        });
+        _closeDelayed(false);
+      },
+      onDone: () {
+        if (!mounted) return;
+        if (!_isFinished) {
+          setState(() {
+            _isFinished = true;
+            _success = true;
+            _statusMessage = "抓取任务运行结束";
+          });
+          _closeDelayed(true);
+        }
+      },
+    );
   }
 
-  Future<void> _runScrape() async {
-    try {
-      final res = await widget.onStart();
-      if (!mounted) return;
-      setState(() {
-        _success = res;
-        _isFinished = true;
-        _stepsCompleted = [true, true, true, true];
-        _stepsActive = [false, false, false, false];
-        _statusMessage = res ? "抓取与 AI 总结成功！" : "抓取失败，请检查配置。";
-      });
-      // Auto close after 1.5 seconds
-      await Future.delayed(const Duration(milliseconds: 1500));
-      if (mounted) {
-        Navigator.pop(context, _success);
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 100),
+          curve: Curves.easeOut,
+        );
       }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _success = false;
-        _isFinished = true;
-        _statusMessage = "抓取异常: $e";
-      });
-      await Future.delayed(const Duration(seconds: 2));
-      if (mounted) {
-        Navigator.pop(context, false);
-      }
+    });
+  }
+
+  void _closeDelayed(bool result) async {
+    await Future.delayed(const Duration(milliseconds: 2000));
+    if (mounted) {
+      Navigator.pop(context, result);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return AlertDialog(
       title: Row(
@@ -993,7 +1103,7 @@ class _ScrapeProgressDialogState extends State<ScrapeProgressDialog> {
         ],
       ),
       content: SizedBox(
-        width: 400,
+        width: 450,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1012,24 +1122,62 @@ class _ScrapeProgressDialogState extends State<ScrapeProgressDialog> {
               "已耗时: $_elapsedSeconds 秒",
               style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 12),
             ),
+            
+            if (_streamingSummary.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text("AI 总结流式输出中:", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+              const SizedBox(height: 6),
+              Container(
+                height: 120,
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+                ),
+                child: Scrollbar(
+                  controller: _scrollController,
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: Text(
+                        _streamingSummary,
+                        style: const TextStyle(fontSize: 13, height: 1.5, fontFamily: 'Roboto'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            
             const SizedBox(height: 16),
             const Divider(),
             const SizedBox(height: 8),
             _buildStepRow(0, "正在连接并拉取 RSS 源 XML 数据"),
             _buildStepRow(1, "解析 XML 并对比过滤重复新闻"),
-            _buildStepRow(2, "使用 AI 模型生成简体中文总结"),
+            _buildStepRow(2, "抓取网页正文并生成 AI 总结"),
             _buildStepRow(3, "持久化存储到后端数据库"),
           ],
         ),
       ),
-      actions: _isFinished
-          ? [
-              TextButton(
-                onPressed: () => Navigator.pop(context, _success),
-                child: const Text("关闭"),
-              )
-            ]
-          : null,
+      actions: [
+        if (!_isFinished)
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context, null);
+            },
+            icon: const Icon(Icons.dns, size: 16),
+            label: const Text("后台运行"),
+          ),
+        if (_isFinished)
+          TextButton(
+            onPressed: () => Navigator.pop(context, _success),
+            child: const Text("关闭"),
+          )
+      ],
     );
   }
 
@@ -1065,6 +1213,145 @@ class _ScrapeProgressDialogState extends State<ScrapeProgressDialog> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class RssArticleDetailPage extends StatelessWidget {
+  const RssArticleDetailPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final art = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    String timeStr = "";
+    if (art['published_at'] != null) {
+      try {
+        final parsed = DateTime.parse(art['published_at']);
+        timeStr = "${parsed.year}-${parsed.month.toString().padLeft(2, '0')}-${parsed.day.toString().padLeft(2, '0')} ${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}";
+      } catch (e) {
+        timeStr = art['published_at'].toString();
+      }
+    }
+
+    final hasAI = art['model_used'] != null && art['model_used'] != '';
+
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(art['feed_name'] ?? '新闻正文', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.launch),
+            onPressed: () async {
+              final uri = Uri.tryParse(art['url'] ?? '');
+              if (uri != null) {
+                await launchUrl(uri);
+              }
+            },
+            tooltip: "查看原文",
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 800),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+            child: ListView(
+              children: [
+                Text(
+                  art['title'] ?? '',
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, height: 1.3),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text(
+                      timeStr,
+                      style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.5), fontSize: 13),
+                    ),
+                    const SizedBox(width: 12),
+                    if (hasAI)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          "AI: ${art['model_used']}",
+                          style: const TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                if (art['ai_summary'] != null && art['ai_summary'] != '') ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.blue.withOpacity(0.08) : Colors.blue.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.auto_awesome, color: Colors.blue, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              "AI 总结说明",
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.blue[200] : Colors.blue[800],
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          art['ai_summary'],
+                          style: TextStyle(
+                            fontSize: 14,
+                            height: 1.6,
+                            color: theme.colorScheme.onSurface.withOpacity(0.9),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+                const Text(
+                  "网页正文内容",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                const Divider(),
+                const SizedBox(height: 12),
+                Text(
+                  art['content'] != null && art['content'] != '' 
+                      ? art['content'] 
+                      : (art['summary'] != null && art['summary'] != '' ? art['summary'] : '暂无内容介绍'),
+                  style: const TextStyle(fontSize: 15, height: 1.7),
+                ),
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

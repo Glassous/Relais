@@ -280,6 +280,34 @@ class ApiService {
     return false;
   }
 
+  static Stream<String> triggerScrapeStream(String id, {String? modelId}) async* {
+    final client = http.Client();
+    try {
+      String url = "$baseUrl/api/admin/rss/feeds/$id/scrape-stream";
+      if (modelId != null && modelId.isNotEmpty) {
+        url += "?model_id=$modelId";
+      }
+      final request = http.Request("GET", Uri.parse(url));
+      request.headers.addAll(_headers);
+
+      final response = await client.send(request);
+      if (response.statusCode == 200) {
+        final lines = response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter());
+        await for (final line in lines) {
+          yield line;
+        }
+      } else {
+        yield "error: Status code ${response.statusCode}";
+      }
+    } catch (e) {
+      yield "error: $e";
+    } finally {
+      client.close();
+    }
+  }
+
   // RSS Articles
   static Future<List<dynamic>> getRssArticles({String? feedId}) async {
     try {
