@@ -1,0 +1,13 @@
+# Local environment configurations
+backend/.env
+
+# Go Compiled Binaries
+backend/relais-backend
+backend/relais-backend.exe
+backend/*.exe
+*.exe
+
+# OS generated files
+.DS_Store
+Thumbs.db
+*.db
