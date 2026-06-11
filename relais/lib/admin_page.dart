@@ -250,27 +250,13 @@ class _AdminPageState extends State<AdminPage> {
     List<dynamic> kiloModels = [];
     bool isFetching = true;
     String errorMessage = '';
+    final Map<String, bool> expandedStates = {};
 
     showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            // Initiate fetch on first build
-            if (isFetching && kiloModels.isEmpty && errorMessage.isEmpty) {
-              ApiService.getKiloModels().then((models) {
-                setModalState(() {
-                  kiloModels = models;
-                  isFetching = false;
-                });
-              }).catchError((err) {
-                setModalState(() {
-                  errorMessage = err.toString();
-                  isFetching = false;
-                });
-              });
-            }
-
             String getProviderName(Map<String, dynamic> m) {
               final name = m['name'] as String? ?? '';
               if (name.contains(':')) {
@@ -283,6 +269,30 @@ class _AdminPageState extends State<AdminPage> {
                 return first.substring(0, 1).toUpperCase() + first.substring(1);
               }
               return '其他';
+            }
+
+            // Initiate fetch on first build
+            if (isFetching && kiloModels.isEmpty && errorMessage.isEmpty) {
+              ApiService.getKiloModels().then((models) {
+                setModalState(() {
+                  kiloModels = models;
+                  isFetching = false;
+
+                  // Initialize first group as expanded, others as collapsed
+                  final Set<String> providers = {};
+                  for (var m in models) {
+                    providers.add(getProviderName(m));
+                  }
+                  for (int i = 0; i < providers.length; i++) {
+                    expandedStates[providers.elementAt(i)] = (i == 0);
+                  }
+                });
+              }).catchError((err) {
+                setModalState(() {
+                  errorMessage = err.toString();
+                  isFetching = false;
+                });
+              });
             }
 
             final Map<String, List<dynamic>> groupedModels = {};
@@ -310,127 +320,140 @@ class _AdminPageState extends State<AdminPage> {
                         ? Center(child: Text("加载失败: $errorMessage"))
                         : kiloModels.isEmpty
                             ? const Center(child: Text("未找到可用模型"))
-                            : ListView.builder(
-                                itemCount: groupedModels.keys.length,
-                                itemBuilder: (context, groupIndex) {
-                                  final provider = groupedModels.keys.elementAt(groupIndex);
-                                  final models = groupedModels[provider]!;
-
-                                  return ExpansionTile(
-                                    title: Text(
-                                      provider,
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            : CustomScrollView(
+                                slivers: [
+                                  for (final provider in groupedModels.keys) ...[
+                                    SliverPersistentHeader(
+                                      pinned: expandedStates[provider] ?? false,
+                                      delegate: ProviderHeaderDelegate(
+                                        providerName: provider,
+                                        count: groupedModels[provider]!.length,
+                                        isExpanded: expandedStates[provider] ?? false,
+                                        onTap: () {
+                                          setModalState(() {
+                                            final bool wasExpanded = expandedStates[provider] ?? false;
+                                            if (!wasExpanded) {
+                                              // Collapse all others
+                                              expandedStates.updateAll((key, value) => false);
+                                            }
+                                            expandedStates[provider] = !wasExpanded;
+                                          });
+                                        },
+                                      ),
                                     ),
-                                    subtitle: Text("共 ${models.length} 个模型"),
-                                    initiallyExpanded: groupIndex == 0,
-                                    children: models.map<Widget>((m) {
-                                      final id = m['id'] ?? '';
-                                      final name = m['name'] ?? '';
-                                      final desc = m['description'] ?? '';
-                                      final isFree = m['isFree'] == true;
+                                    if (expandedStates[provider] ?? false)
+                                      SliverList(
+                                        delegate: SliverChildListDelegate(
+                                          groupedModels[provider]!.map<Widget>((m) {
+                                            final id = m['id'] ?? '';
+                                            final name = m['name'] ?? '';
+                                            final desc = m['description'] ?? '';
+                                            final isFree = m['isFree'] == true;
 
-                                      // Pricing info
-                                      String pricingStr = "";
-                                      final pricing = m['pricing'];
-                                      if (isFree) {
-                                        pricingStr = "免费";
-                                      } else if (pricing != null) {
-                                        final prompt = pricing['prompt'];
-                                        final comp = pricing['completion'];
-                                        if (prompt != null && comp != null) {
-                                          double promptD = double.tryParse(prompt.toString()) ?? 0.0;
-                                          double compD = double.tryParse(comp.toString()) ?? 0.0;
-                                          pricingStr = "输入: \$${(promptD * 1000000).toStringAsFixed(2)}/M | 输出: \$${(compD * 1000000).toStringAsFixed(2)}/M";
-                                        }
-                                      }
+                                            // Pricing info
+                                            String pricingStr = "";
+                                            final pricing = m['pricing'];
+                                            if (isFree) {
+                                              pricingStr = "免费";
+                                            } else if (pricing != null) {
+                                              final prompt = pricing['prompt'];
+                                              final comp = pricing['completion'];
+                                              if (prompt != null && comp != null) {
+                                                double promptD = double.tryParse(prompt.toString()) ?? 0.0;
+                                                double compD = double.tryParse(comp.toString()) ?? 0.0;
+                                                pricingStr = "输入: \$${(promptD * 1000000).toStringAsFixed(2)}/M | 输出: \$${(compD * 1000000).toStringAsFixed(2)}/M";
+                                              }
+                                            }
 
-                                      return Card(
-                                        margin: const EdgeInsets.only(bottom: 12, left: 8, right: 8),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
-                                          side: BorderSide(
-                                            color: isFree
-                                                ? Colors.green.withOpacity(0.3)
-                                                : Colors.grey.withOpacity(0.2),
-                                          ),
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(12.0),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      name,
-                                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                            return Card(
+                                              margin: const EdgeInsets.only(bottom: 12, left: 8, right: 8, top: 4),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(10),
+                                                side: BorderSide(
+                                                  color: isFree
+                                                      ? Colors.green.withOpacity(0.3)
+                                                      : Colors.grey.withOpacity(0.2),
+                                                ),
+                                              ),
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(12.0),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                      children: [
+                                                        Expanded(
+                                                          child: Text(
+                                                            name,
+                                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                                          ),
+                                                        ),
+                                                        if (isFree)
+                                                          Container(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.green.withOpacity(0.1),
+                                                              borderRadius: BorderRadius.circular(4),
+                                                            ),
+                                                            child: const Text(
+                                                              "FREE",
+                                                              style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
+                                                            ),
+                                                          ),
+                                                      ],
                                                     ),
-                                                  ),
-                                                  if (isFree)
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.green.withOpacity(0.1),
-                                                        borderRadius: BorderRadius.circular(4),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      "ID: $id",
+                                                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.grey),
+                                                    ),
+                                                    if (desc.isNotEmpty) ...[
+                                                      const SizedBox(height: 6),
+                                                      Text(
+                                                        desc,
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
                                                       ),
-                                                      child: const Text(
-                                                        "FREE",
-                                                        style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
+                                                    ],
+                                                    if (pricingStr.isNotEmpty) ...[
+                                                      const SizedBox(height: 8),
+                                                      Text(
+                                                        pricingStr,
+                                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.blueGrey),
+                                                      ),
+                                                    ],
+                                                    const SizedBox(height: 8),
+                                                    Align(
+                                                      alignment: Alignment.centerRight,
+                                                      child: OutlinedButton.icon(
+                                                        onPressed: () {
+                                                          Clipboard.setData(ClipboardData(text: id));
+                                                          ScaffoldMessenger.of(context).showSnackBar(
+                                                            SnackBar(
+                                                              content: Text("已复制模型 ID: $id"),
+                                                              duration: const Duration(seconds: 1),
+                                                            ),
+                                                          );
+                                                        },
+                                                        icon: const Icon(Icons.copy, size: 14),
+                                                        label: const Text("复制 ID"),
+                                                        style: OutlinedButton.styleFrom(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                                        ),
                                                       ),
                                                     ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                "ID: $id",
-                                                style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.grey),
-                                              ),
-                                              if (desc.isNotEmpty) ...[
-                                                const SizedBox(height: 6),
-                                                Text(
-                                                  desc,
-                                                  maxLines: 2,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
-                                                ),
-                                              ],
-                                              if (pricingStr.isNotEmpty) ...[
-                                                const SizedBox(height: 8),
-                                                Text(
-                                                  pricingStr,
-                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.blueGrey),
-                                                ),
-                                              ],
-                                              const SizedBox(height: 8),
-                                              Align(
-                                                alignment: Alignment.centerRight,
-                                                child: OutlinedButton.icon(
-                                                  onPressed: () {
-                                                    Clipboard.setData(ClipboardData(text: id));
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      SnackBar(
-                                                        content: Text("已复制模型 ID: $id"),
-                                                        duration: const Duration(seconds: 1),
-                                                      ),
-                                                    );
-                                                  },
-                                                  icon: const Icon(Icons.copy, size: 14),
-                                                  label: const Text("复制 ID"),
-                                                  style: OutlinedButton.styleFrom(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                                  ),
+                                                  ],
                                                 ),
                                               ),
-                                            ],
-                                          ),
+                                            );
+                                          }).toList(),
                                         ),
-                                      );
-                                    }).toList(),
-                                  );
-                                },
+                                      ),
+                                  ]
+                                ],
                               ),
               ),
               actions: [
@@ -899,5 +922,88 @@ class _AdminPageState extends State<AdminPage> {
         );
       },
     );
+  }
+}
+
+class ProviderHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final String providerName;
+  final int count;
+  final bool isExpanded;
+  final VoidCallback onTap;
+
+  ProviderHeaderDelegate({
+    required this.providerName,
+    required this.count,
+    required this.isExpanded,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      color: theme.colorScheme.surface,
+      alignment: Alignment.center,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          providerName,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          "共 $count 个模型",
+                          style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurface.withOpacity(0.5)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    color: theme.colorScheme.primary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  double get maxExtent => 56.0;
+
+  @override
+  double get minExtent => 48.0;
+
+  @override
+  bool shouldRebuild(covariant ProviderHeaderDelegate oldDelegate) {
+    return oldDelegate.providerName != providerName ||
+        oldDelegate.count != count ||
+        oldDelegate.isExpanded != isExpanded;
   }
 }

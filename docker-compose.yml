@@ -9,7 +9,7 @@ services:
     environment:
       - PORT=8184
       - MONGO_URI=mongodb://mongodb:27017/workspace
-      - WORKSPACE_PASSWORD=admin123  # Change this password as needed
+      - WORKSPACE_PASSWORD=${WORKSPACE_PASSWORD:-admin123}  # Change this password as needed
     depends_on:
       - mongodb
     restart: always
