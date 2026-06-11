@@ -204,4 +204,125 @@ class ApiService {
     }
     return null;
   }
+
+  // RSS Feeds CRUD
+  static Future<List<dynamic>> getRssFeeds() async {
+    try {
+      final response = await http.get(
+        Uri.parse("$baseUrl/api/admin/rss/feeds"),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print("Get RSS feeds error: $e");
+    }
+    return [];
+  }
+
+  static Future<Map<String, dynamic>?> createRssFeed(Map<String, dynamic> feedData) async {
+    try {
+      final response = await http.post(
+        Uri.parse("$baseUrl/api/admin/rss/feeds"),
+        headers: _headers,
+        body: jsonEncode(feedData),
+      );
+      if (response.statusCode == 201) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print("Create RSS feed error: $e");
+    }
+    return null;
+  }
+
+  static Future<Map<String, dynamic>?> updateRssFeed(String id, Map<String, dynamic> feedData) async {
+    try {
+      final response = await http.put(
+        Uri.parse("$baseUrl/api/admin/rss/feeds/$id"),
+        headers: _headers,
+        body: jsonEncode(feedData),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print("Update RSS feed error: $e");
+    }
+    return null;
+  }
+
+  static Future<bool> deleteRssFeed(String id) async {
+    try {
+      final response = await http.delete(
+        Uri.parse("$baseUrl/api/admin/rss/feeds/$id"),
+        headers: _headers,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Delete RSS feed error: $e");
+    }
+    return false;
+  }
+
+  static Future<bool> triggerScrape(String id, {String? modelId}) async {
+    try {
+      final response = await http.post(
+        Uri.parse("$baseUrl/api/admin/rss/feeds/$id/scrape"),
+        headers: _headers,
+        body: modelId != null ? jsonEncode({"model_id": modelId}) : null,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Trigger scrape error: $e");
+    }
+    return false;
+  }
+
+  // RSS Articles
+  static Future<List<dynamic>> getRssArticles({String? feedId}) async {
+    try {
+      String url = "$baseUrl/api/admin/rss/articles";
+      if (feedId != null && feedId.isNotEmpty) {
+        url += "?feed_id=$feedId";
+      }
+      final response = await http.get(
+        Uri.parse(url),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      print("Get RSS articles error: $e");
+    }
+    return [];
+  }
+
+  static Future<bool> deleteRssArticle(String id) async {
+    try {
+      final response = await http.delete(
+        Uri.parse("$baseUrl/api/admin/rss/articles/$id"),
+        headers: _headers,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Delete RSS article error: $e");
+    }
+    return false;
+  }
+
+  static Future<bool> clearAllRssArticles() async {
+    try {
+      final response = await http.delete(
+        Uri.parse("$baseUrl/api/admin/rss/articles"),
+        headers: _headers,
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      print("Clear all RSS articles error: $e");
+    }
+    return false;
+  }
 }

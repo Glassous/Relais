@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'api_service.dart';
 import 'main.dart';
 import 'dashboard_view.dart';
+import 'rss_reader_view.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -12,7 +13,7 @@ class AdminPage extends StatefulWidget {
 }
 
 class _AdminPageState extends State<AdminPage> {
-  int _activeTab = 0; // 0: Dashboard, 1: Models, 2: API Keys
+  int _activeTab = 0; // 0: Dashboard, 1: Models, 2: API Keys, 3: RSS Reader
   List<dynamic> _models = [];
   List<dynamic> _apiKeys = [];
   bool _isLoading = false;
@@ -481,133 +482,142 @@ class _AdminPageState extends State<AdminPage> {
         : ApiService.baseUrl;
 
     final Widget contentBody = Padding(
-      padding: EdgeInsets.all(isMobile ? 16.0 : 40.0),
+      padding: _activeTab == 3
+          ? EdgeInsets.only(
+              left: isMobile ? 16.0 : 40.0,
+              right: isMobile ? 16.0 : 40.0,
+              top: isMobile ? 16.0 : 40.0,
+              bottom: 0,
+            )
+          : EdgeInsets.all(isMobile ? 16.0 : 40.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
-          isMobile
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _activeTab == 0
-                          ? "Token 统计与分析仪表盘"
-                          : _activeTab == 1
-                              ? "AI 模型映射管理"
-                              : "网关 API 密钥管理",
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _activeTab == 0
-                          ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
-                          : _activeTab == 1
-                              ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
-                              : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
-                      style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
-                    ),
-                    if (_activeTab != 0) ...[
-                      const SizedBox(height: 16),
-                      if (_activeTab == 1) ...[
-                        Row(
-                          children: [
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: () => _showModelDialog(),
-                                icon: const Icon(Icons.add),
-                                label: const Text("新增模型"),
-                                style: FilledButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          // Header (only for non-RSS tabs)
+          if (_activeTab != 3) ...[
+            isMobile
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _activeTab == 0
+                            ? "Token 统计与分析仪表盘"
+                            : _activeTab == 1
+                                ? "AI 模型映射管理"
+                                : "网关 API 密钥管理",
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _activeTab == 0
+                            ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
+                            : _activeTab == 1
+                                ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
+                                : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
+                        style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
+                      ),
+                      if (_activeTab == 1 || _activeTab == 2) ...[
+                        const SizedBox(height: 16),
+                        if (_activeTab == 1) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: () => _showModelDialog(),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text("新增模型"),
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () => _showProviderSelectionDialog(),
-                                icon: const Icon(Icons.list_alt_outlined),
-                                label: const Text("推荐模型"),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _showProviderSelectionDialog(),
+                                  icon: const Icon(Icons.list_alt_outlined),
+                                  label: const Text("推荐模型"),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ] else ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: _showKeyDialog,
-                            icon: const Icon(Icons.add),
-                            label: const Text("创建密钥"),
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ],
-                  ],
-                )
-              : Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _activeTab == 0
-                              ? "Token 统计与分析仪表盘"
-                              : _activeTab == 1
-                                  ? "AI 模型映射管理"
-                                  : "网关 API 密钥管理",
-                          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _activeTab == 0
-                              ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
-                              : _activeTab == 1
-                                  ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
-                                  : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
-                          style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 14),
-                        ),
-                      ],
-                    ),
-                    if (_activeTab != 0)
-                      Row(
-                        children: [
-                          if (_activeTab == 1) ...[
-                            OutlinedButton.icon(
-                              onPressed: () => _showProviderSelectionDialog(),
-                              icon: const Icon(Icons.list_alt_outlined),
-                              label: const Text("推荐模型列表"),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        ] else ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _showKeyDialog,
+                              icon: const Icon(Icons.add),
+                              label: const Text("创建密钥"),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 14),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
                             ),
-                            const SizedBox(width: 12),
-                          ],
-                          FilledButton.icon(
-                            onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
-                            icon: const Icon(Icons.add),
-                            label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _activeTab == 0
+                                ? "Token 统计与分析仪表盘"
+                                : _activeTab == 1
+                                    ? "AI 模型映射管理"
+                                    : "网关 API 密钥管理",
+                            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _activeTab == 0
+                                ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
+                                : _activeTab == 1
+                                    ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
+                                    : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
+                            style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 14),
                           ),
                         ],
                       ),
-                  ],
-                ),
-          SizedBox(height: isMobile ? 20 : 32),
+                      if (_activeTab == 1 || _activeTab == 2)
+                        Row(
+                          children: [
+                            if (_activeTab == 1) ...[
+                              OutlinedButton.icon(
+                                onPressed: () => _showProviderSelectionDialog(),
+                                icon: const Icon(Icons.list_alt_outlined),
+                                label: const Text("推荐模型列表"),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                            ],
+                            FilledButton.icon(
+                              onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
+                              icon: const Icon(Icons.add),
+                              label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+            SizedBox(height: isMobile ? 20 : 32),
+          ],
 
           // Content Body
           Expanded(
@@ -617,7 +627,9 @@ class _AdminPageState extends State<AdminPage> {
                     ? const DashboardView()
                     : _activeTab == 1
                         ? _buildModelsView()
-                        : _buildKeysView(),
+                        : _activeTab == 2
+                            ? _buildKeysView()
+                            : const RssReaderView(),
           ),
         ],
       ),
@@ -675,6 +687,11 @@ class _AdminPageState extends State<AdminPage> {
                   icon: Icon(Icons.key_outlined),
                   selectedIcon: Icon(Icons.key),
                   label: "网关密钥",
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.newspaper_outlined),
+                  selectedIcon: Icon(Icons.newspaper),
+                  label: "AI新闻",
                 ),
               ],
             )
@@ -750,6 +767,11 @@ class _AdminPageState extends State<AdminPage> {
                       icon: Icon(Icons.key_outlined),
                       selectedIcon: Icon(Icons.key),
                       label: Text("网关密钥"),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.newspaper_outlined),
+                      selectedIcon: Icon(Icons.newspaper),
+                      label: Text("AI新闻"),
                     ),
                   ],
                 ),

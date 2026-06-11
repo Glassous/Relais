@@ -16,6 +16,8 @@ var (
 	ModelColl    *mongo.Collection
 	ApiKeyColl   *mongo.Collection
 	TokenLogColl *mongo.Collection
+	RssFeedColl    *mongo.Collection
+	RssArticleColl *mongo.Collection
 )
 
 type TokenLog struct {
@@ -47,6 +49,31 @@ type WorkspaceApiKey struct {
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 }
 
+type RssFeed struct {
+	ID             string    `bson:"_id,omitempty" json:"id"`
+	Name           string    `bson:"name" json:"name"`
+	URL            string    `bson:"url" json:"url"`
+	ScheduleTime   string    `bson:"schedule_time" json:"schedule_time"` // e.g. "09:30", empty means disabled
+	ModelID        string    `bson:"model_id" json:"model_id"`           // AIModel ID
+	ModelName      string    `bson:"model_name" json:"model_name"`       // AIModel display name
+	LastScrapedAt  time.Time `bson:"last_scraped_at" json:"last_scraped_at"`
+	LastScrapedDay string    `bson:"last_scraped_day" json:"last_scraped_day"` // e.g. "2026-06-11"
+	CreatedAt      time.Time `bson:"created_at" json:"created_at"`
+}
+
+type RssArticle struct {
+	ID          string    `bson:"_id,omitempty" json:"id"`
+	FeedID      string    `bson:"feed_id" json:"feed_id"`
+	FeedName    string    `bson:"feed_name" json:"feed_name"`
+	Title       string    `bson:"title" json:"title"`
+	URL         string    `bson:"url" json:"url"`
+	Summary     string    `bson:"summary" json:"summary"`       // original RSS summary
+	AISummary   string    `bson:"ai_summary" json:"ai_summary"` // AI generated Simplified Chinese summary
+	ModelUsed   string    `bson:"model_used" json:"model_used"`
+	PublishedAt time.Time `bson:"published_at" json:"published_at"`
+	CreatedAt   time.Time `bson:"created_at" json:"created_at"`
+}
+
 func InitDB() {
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
@@ -71,6 +98,8 @@ func InitDB() {
 	ModelColl = DB.Collection("models")
 	ApiKeyColl = DB.Collection("api_keys")
 	TokenLogColl = DB.Collection("token_logs")
+	RssFeedColl = DB.Collection("rss_feeds")
+	RssArticleColl = DB.Collection("rss_articles")
 
 	log.Println("Successfully connected to MongoDB database.")
 }

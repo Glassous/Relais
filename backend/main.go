@@ -32,6 +32,10 @@ func main() {
 	// Initialize database
 	InitDB()
 
+	// Initialize preset RSS feeds and start scheduler
+	InitPresetFeeds()
+	go StartRssScheduler()
+
 	// Initialize Gin router
 	r := gin.Default()
 
@@ -70,6 +74,16 @@ func main() {
 		admin.GET("/keys", GetApiKeys)
 		admin.POST("/keys", CreateApiKey)
 		admin.DELETE("/keys/:id", DeleteApiKey)
+
+		// RSS Feeds & Articles CRUD
+		admin.GET("/rss/feeds", GetRssFeeds)
+		admin.POST("/rss/feeds", CreateRssFeed)
+		admin.PUT("/rss/feeds/:id", UpdateRssFeed)
+		admin.DELETE("/rss/feeds/:id", DeleteRssFeed)
+		admin.POST("/rss/feeds/:id/scrape", ScrapeRssFeedHandler)
+		admin.GET("/rss/articles", GetRssArticles)
+		admin.DELETE("/rss/articles/:id", DeleteRssArticle)
+		admin.DELETE("/rss/articles", DeleteAllRssArticles)
 	}
 
 	// Get port from env or default
