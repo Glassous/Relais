@@ -62,7 +62,11 @@ class _DocsPageState extends State<DocsPage> {
           ElevatedButton.icon(
             onPressed: () {
               if (ApiService.token != null) {
-                Navigator.pushNamed(context, '/admin');
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context);
+                } else {
+                  Navigator.pushReplacementNamed(context, '/admin');
+                }
               } else {
                 Navigator.pushNamed(context, '/login');
               }

@@ -90,6 +90,7 @@ class MyApp extends StatelessWidget {
             '/': (context) => const InitialDispatcher(),
             '/login': (context) => const LoginPage(),
             '/admin': (context) => const ProtectedAdminRoute(),
+            '/docs': (context) => const DocsPage(),
           },
         );
       },

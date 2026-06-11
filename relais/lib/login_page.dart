@@ -191,7 +191,7 @@ class _LoginPageState extends State<LoginPage> {
                     // Mirror Station Link (MD3 OutlinedButton)
                     OutlinedButton(
                       onPressed: () {
-                        Navigator.pushNamed(context, '/');
+                        Navigator.pushNamed(context, '/docs');
                       },
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 18),

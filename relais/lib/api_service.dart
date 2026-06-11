@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static String baseUrl = "http://localhost:8184";
+  static String baseUrl = "https://relais.glassous.top";
   static String? token;
 
   static const String _tokenKey = "relais_token";
@@ -23,7 +23,7 @@ class ApiService {
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     token = prefs.getString(_tokenKey);
-    baseUrl = prefs.getString(_urlKey) ?? "http://localhost:8184";
+    baseUrl = prefs.getString(_urlKey) ?? "https://relais.glassous.top";
   }
 
   static Future<void> saveSession(String newToken, String newUrl) async {

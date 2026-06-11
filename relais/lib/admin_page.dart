@@ -279,7 +279,7 @@ class _AdminPageState extends State<AdminPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.menu_book_outlined, color: Colors.blueGrey),
-                  onPressed: () => Navigator.pushNamed(context, '/'),
+                  onPressed: () => Navigator.pushNamed(context, '/docs'),
                   tooltip: "查看使用文档",
                 ),
                 IconButton(
@@ -359,7 +359,7 @@ class _AdminPageState extends State<AdminPage> {
                             const SizedBox(height: 12),
                             IconButton(
                               icon: const Icon(Icons.menu_book_outlined, color: Colors.blueGrey),
-                              onPressed: () => Navigator.pushNamed(context, '/'),
+                              onPressed: () => Navigator.pushNamed(context, '/docs'),
                               tooltip: "查看使用文档",
                             ),
                             const SizedBox(height: 12),
