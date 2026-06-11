@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"time"
 
@@ -186,6 +187,29 @@ func ValidateGatewayKey(keyStr string) (*WorkspaceApiKey, error) {
 		return nil, err
 	}
 	return &result, nil
+}
+
+// GetKiloModels fetches models from kilo.ai and proxies them back to the frontend
+func GetKiloModels(c *gin.Context) {
+	resp, err := http.Get("https://api.kilo.ai/api/gateway/models")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch Kilo models: " + err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		c.JSON(resp.StatusCode, gin.H{"error": "Upstream error fetching Kilo models"})
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response body: " + err.Error()})
+		return
+	}
+
+	c.Data(http.StatusOK, "application/json", bodyBytes)
 }
 
 

@@ -35,11 +35,31 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   void _showModelDialog([Map<String, dynamic>? model]) {
-    final isEdit = model != null;
-    final nameController = TextEditingController(text: isEdit ? model['custom_name'] : '');
-    final urlController = TextEditingController(text: isEdit ? model['provider_base_url'] : '');
-    final keyController = TextEditingController(text: isEdit ? model['provider_api_key'] : '');
-    final providerModelController = TextEditingController(text: isEdit ? model['provider_model'] : '');
+    final isEdit = model != null && model['id'] != null;
+
+    // Get unique base URLs and their corresponding API keys from _models
+    final Map<String, String> baseUrlToKey = {};
+    for (var m in _models) {
+      final String? url = m['provider_base_url'];
+      final String? key = m['provider_api_key'];
+      if (url != null && url.isNotEmpty) {
+        if (!baseUrlToKey.containsKey(url) || (key != null && key.isNotEmpty)) {
+          baseUrlToKey[url] = key ?? '';
+        }
+      }
+    }
+
+    final String initialUrl = model != null ? (model['provider_base_url'] ?? '') : '';
+    String initialKey = model != null ? (model['provider_api_key'] ?? '') : '';
+    // If the template/provided model has a base URL but no key, look up if we have a key for this URL already
+    if (initialKey.isEmpty && initialUrl.isNotEmpty && baseUrlToKey.containsKey(initialUrl)) {
+      initialKey = baseUrlToKey[initialUrl]!;
+    }
+
+    final nameController = TextEditingController(text: model != null ? model['custom_name'] : '');
+    final urlController = TextEditingController(text: initialUrl);
+    final keyController = TextEditingController(text: initialKey);
+    final providerModelController = TextEditingController(text: model != null ? model['provider_model'] : '');
 
     showDialog(
       context: context,
@@ -59,7 +79,35 @@ class _AdminPageState extends State<AdminPage> {
                     children: [
                       _buildDialogTextField("自定义模型名称", nameController, "e.g., my-gpt-4o"),
                       const SizedBox(height: 16),
-                      _buildDialogTextField("提供商 Base URL", urlController, "e.g., https://api.openai.com/v1"),
+                      _buildDialogTextField(
+                        "提供商 Base URL",
+                        urlController,
+                        "e.g., https://api.openai.com/v1",
+                        suffixIcon: baseUrlToKey.isNotEmpty
+                            ? PopupMenuButton<String>(
+                                icon: const Icon(Icons.arrow_drop_down),
+                                onSelected: (String value) {
+                                  urlController.text = value;
+                                  if (baseUrlToKey[value] != null) {
+                                    keyController.text = baseUrlToKey[value]!;
+                                  }
+                                  setModalState(() {});
+                                },
+                                itemBuilder: (BuildContext context) {
+                                  return baseUrlToKey.keys.map<PopupMenuItem<String>>((String url) {
+                                    return PopupMenuItem<String>(
+                                      value: url,
+                                      child: Text(
+                                        url,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
+                                    );
+                                  }).toList();
+                                },
+                              )
+                            : null,
+                      ),
                       const SizedBox(height: 16),
                       _buildDialogTextField("提供商 API Key", keyController, "sk-xxxxxx", obscure: true),
                       const SizedBox(height: 16),
@@ -138,7 +186,13 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
-  Widget _buildDialogTextField(String label, TextEditingController controller, String hint, {bool obscure = false}) {
+  Widget _buildDialogTextField(
+    String label,
+    TextEditingController controller,
+    String hint, {
+    bool obscure = false,
+    Widget? suffixIcon,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -150,9 +204,245 @@ class _AdminPageState extends State<AdminPage> {
           decoration: InputDecoration(
             hintText: hint,
             border: const OutlineInputBorder(),
+            suffixIcon: suffixIcon,
           ),
         ),
       ],
+    );
+  }
+
+  void _showProviderSelectionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("选择模型提供商", style: TextStyle(fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: 400,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.cloud_queue_outlined, color: Colors.blue),
+                  title: const Text("Kilo Code", style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text("提供高性价比的多种主流模型及免费模型"),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showKiloModelsDialog();
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("取消"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showKiloModelsDialog() {
+    List<dynamic> kiloModels = [];
+    bool isFetching = true;
+    String errorMessage = '';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // Initiate fetch on first build
+            if (isFetching && kiloModels.isEmpty && errorMessage.isEmpty) {
+              ApiService.getKiloModels().then((models) {
+                setModalState(() {
+                  kiloModels = models;
+                  isFetching = false;
+                });
+              }).catchError((err) {
+                setModalState(() {
+                  errorMessage = err.toString();
+                  isFetching = false;
+                });
+              });
+            }
+
+            String getProviderName(Map<String, dynamic> m) {
+              final name = m['name'] as String? ?? '';
+              if (name.contains(':')) {
+                return name.split(':').first.trim();
+              }
+              final id = m['id'] as String? ?? '';
+              if (id.contains('/')) {
+                final first = id.split('/').first;
+                if (first == 'kilo-auto') return 'Kilo Auto';
+                return first.substring(0, 1).toUpperCase() + first.substring(1);
+              }
+              return '其他';
+            }
+
+            final Map<String, List<dynamic>> groupedModels = {};
+            if (!isFetching && errorMessage.isEmpty && kiloModels.isNotEmpty) {
+              for (var m in kiloModels) {
+                final provider = getProviderName(m);
+                groupedModels.putIfAbsent(provider, () => []).add(m);
+              }
+            }
+
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.hub_outlined, color: Colors.blue),
+                  SizedBox(width: 8),
+                  Text("Kilo Code 快捷选择", style: TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: SizedBox(
+                width: 600,
+                height: 500,
+                child: isFetching
+                    ? const Center(child: CircularProgressIndicator())
+                    : errorMessage.isNotEmpty
+                        ? Center(child: Text("加载失败: $errorMessage"))
+                        : kiloModels.isEmpty
+                            ? const Center(child: Text("未找到可用模型"))
+                            : ListView.builder(
+                                itemCount: groupedModels.keys.length,
+                                itemBuilder: (context, groupIndex) {
+                                  final provider = groupedModels.keys.elementAt(groupIndex);
+                                  final models = groupedModels[provider]!;
+
+                                  return ExpansionTile(
+                                    title: Text(
+                                      provider,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                    ),
+                                    subtitle: Text("共 ${models.length} 个模型"),
+                                    initiallyExpanded: groupIndex == 0,
+                                    children: models.map<Widget>((m) {
+                                      final id = m['id'] ?? '';
+                                      final name = m['name'] ?? '';
+                                      final desc = m['description'] ?? '';
+                                      final isFree = m['isFree'] == true;
+
+                                      // Pricing info
+                                      String pricingStr = "";
+                                      final pricing = m['pricing'];
+                                      if (isFree) {
+                                        pricingStr = "免费";
+                                      } else if (pricing != null) {
+                                        final prompt = pricing['prompt'];
+                                        final comp = pricing['completion'];
+                                        if (prompt != null && comp != null) {
+                                          double promptD = double.tryParse(prompt.toString()) ?? 0.0;
+                                          double compD = double.tryParse(comp.toString()) ?? 0.0;
+                                          pricingStr = "输入: \$${(promptD * 1000000).toStringAsFixed(2)}/M | 输出: \$${(compD * 1000000).toStringAsFixed(2)}/M";
+                                        }
+                                      }
+
+                                      return Card(
+                                        margin: const EdgeInsets.only(bottom: 12, left: 8, right: 8),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                          side: BorderSide(
+                                            color: isFree
+                                                ? Colors.green.withOpacity(0.3)
+                                                : Colors.grey.withOpacity(0.2),
+                                          ),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(12.0),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      name,
+                                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                                    ),
+                                                  ),
+                                                  if (isFree)
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.green.withOpacity(0.1),
+                                                        borderRadius: BorderRadius.circular(4),
+                                                      ),
+                                                      child: const Text(
+                                                        "FREE",
+                                                        style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold),
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                "ID: $id",
+                                                style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Colors.grey),
+                                              ),
+                                              if (desc.isNotEmpty) ...[
+                                                const SizedBox(height: 6),
+                                                Text(
+                                                  desc,
+                                                  maxLines: 2,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6)),
+                                                ),
+                                              ],
+                                              if (pricingStr.isNotEmpty) ...[
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  pricingStr,
+                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.blueGrey),
+                                                ),
+                                              ],
+                                              const SizedBox(height: 8),
+                                              Align(
+                                                alignment: Alignment.centerRight,
+                                                child: OutlinedButton.icon(
+                                                  onPressed: () {
+                                                    Clipboard.setData(ClipboardData(text: id));
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text("已复制模型 ID: $id"),
+                                                        duration: const Duration(seconds: 1),
+                                                      ),
+                                                    );
+                                                  },
+                                                  icon: const Icon(Icons.copy, size: 14),
+                                                  label: const Text("复制 ID"),
+                                                  style: OutlinedButton.styleFrom(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  );
+                                },
+                              ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("返回"),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -196,18 +486,48 @@ class _AdminPageState extends State<AdminPage> {
                     ),
                     if (_activeTab != 0) ...[
                       const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
-                          icon: const Icon(Icons.add),
-                          label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      if (_activeTab == 1) ...[
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: () => _showModelDialog(),
+                                icon: const Icon(Icons.add),
+                                label: const Text("新增模型"),
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _showProviderSelectionDialog(),
+                                icon: const Icon(Icons.list_alt_outlined),
+                                label: const Text("推荐模型"),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _showKeyDialog,
+                            icon: const Icon(Icons.add),
+                            label: const Text("创建密钥"),
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ],
                 )
@@ -237,14 +557,30 @@ class _AdminPageState extends State<AdminPage> {
                       ],
                     ),
                     if (_activeTab != 0)
-                      FilledButton.icon(
-                        onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
-                        icon: const Icon(Icons.add),
-                        label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
+                      Row(
+                        children: [
+                          if (_activeTab == 1) ...[
+                            OutlinedButton.icon(
+                              onPressed: () => _showProviderSelectionDialog(),
+                              icon: const Icon(Icons.list_alt_outlined),
+                              label: const Text("推荐模型列表"),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                          ],
+                          FilledButton.icon(
+                            onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
+                            icon: const Icon(Icons.add),
+                            label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ],
                       ),
                   ],
                 ),

@@ -122,6 +122,28 @@ class ApiService {
     return false;
   }
 
+  // Fetch Kilo Models proxied through backend
+  static Future<List<dynamic>> getKiloModels() async {
+    try {
+      final response = await http.get(
+        Uri.parse("$baseUrl/api/admin/kilo/models"),
+        headers: _headers,
+      );
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded["data"] is List) {
+          return decoded["data"];
+        }
+        if (decoded is List) {
+          return decoded;
+        }
+      }
+    } catch (e) {
+      print("Get Kilo models error: $e");
+    }
+    return [];
+  }
+
   // Workspace API Keys CRUD
   static Future<List<dynamic>> getApiKeys() async {
     try {

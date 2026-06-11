@@ -61,6 +61,7 @@ func main() {
 
 		// Models CRUD
 		admin.GET("/models", GetModels)
+		admin.GET("/kilo/models", GetKiloModels)
 		admin.POST("/models", CreateModel)
 		admin.PUT("/models/:id", UpdateModel)
 		admin.DELETE("/models/:id", DeleteModel)
