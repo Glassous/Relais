@@ -78,50 +78,88 @@ class _DashboardViewState extends State<DashboardView> {
 
     final double successRate = totalRequests > 0 ? (successRequests / totalRequests) * 100 : 0.0;
 
+    final isMobile = MediaQuery.of(context).size.width < 768;
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row of KPI Cards
-          Row(
-            children: [
-              Expanded(child: _buildKpiCard("输入 Token (Prompt)", totalPrompt.toString(), Icons.arrow_downward, Colors.blue)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildKpiCard("输出 Token (Completion)", totalCompletion.toString(), Icons.arrow_upward, Colors.green)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildKpiCard("深度思考 Token (Reasoning)", totalReasoning.toString(), Icons.psychology_outlined, Colors.purple)),
-              const SizedBox(width: 16),
-              Expanded(child: _buildKpiCard("请求总量 (成功率)", "$totalRequests 次 (${successRate.toStringAsFixed(1)}%)", Icons.online_prediction, Colors.teal)),
-            ],
-          ),
+          // KPI Cards
+          isMobile
+              ? Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: _buildKpiCard("输入 Token (Prompt)", totalPrompt.toString(), Icons.arrow_downward, Colors.blue)),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildKpiCard("输出 Token (Completion)", totalCompletion.toString(), Icons.arrow_upward, Colors.green)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(child: _buildKpiCard("深度思考 Token", totalReasoning.toString(), Icons.psychology_outlined, Colors.purple)),
+                        const SizedBox(width: 12),
+                        Expanded(child: _buildKpiCard("请求总量 (成功率)", "$totalRequests 次\n(${successRate.toStringAsFixed(1)}%)", Icons.online_prediction, Colors.teal)),
+                      ],
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: _buildKpiCard("输入 Token (Prompt)", totalPrompt.toString(), Icons.arrow_downward, Colors.blue)),
+                    const SizedBox(width: 16),
+                    Expanded(child: _buildKpiCard("输出 Token (Completion)", totalCompletion.toString(), Icons.arrow_upward, Colors.green)),
+                    const SizedBox(width: 16),
+                    Expanded(child: _buildKpiCard("深度思考 Token (Reasoning)", totalReasoning.toString(), Icons.psychology_outlined, Colors.purple)),
+                    const SizedBox(width: 16),
+                    Expanded(child: _buildKpiCard("请求总量 (成功率)", "$totalRequests 次 (${successRate.toStringAsFixed(1)}%)", Icons.online_prediction, Colors.teal)),
+                  ],
+                ),
           const SizedBox(height: 28),
 
           // Mid-section Grid (Distributions)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Model distribution
-              Expanded(
-                child: _buildDistributionCard("模型使用排行 (Tokens)", models, (item) {
-                  return item['_id'] ?? '未知模型';
-                }, (item) {
-                  return item['total_tokens'] ?? 0;
-                }, theme, isDark),
-              ),
-              const SizedBox(width: 20),
-              // API Key distribution
-              Expanded(
-                child: _buildDistributionCard("API 密钥使用排行 (Tokens)", keys, (item) {
-                  return item['_id'] ?? '无名称密钥';
-                }, (item) {
-                  return item['total_tokens'] ?? 0;
-                }, theme, isDark),
-              ),
-            ],
-          ),
+          isMobile
+              ? Column(
+                  children: [
+                    _buildDistributionCard("模型使用排行 (Tokens)", models, (item) {
+                      return item['_id'] ?? '未知模型';
+                    }, (item) {
+                      return item['total_tokens'] ?? 0;
+                    }, theme, isDark),
+                    const SizedBox(height: 16),
+                    _buildDistributionCard("API 密钥使用排行 (Tokens)", keys, (item) {
+                      return item['_id'] ?? '无名称密钥';
+                    }, (item) {
+                      return item['total_tokens'] ?? 0;
+                    }, theme, isDark),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Model distribution
+                    Expanded(
+                      child: _buildDistributionCard("模型使用排行 (Tokens)", models, (item) {
+                        return item['_id'] ?? '未知模型';
+                      }, (item) {
+                        return item['total_tokens'] ?? 0;
+                      }, theme, isDark),
+                    ),
+                    const SizedBox(width: 20),
+                    // API Key distribution
+                    Expanded(
+                      child: _buildDistributionCard("API 密钥使用排行 (Tokens)", keys, (item) {
+                        return item['_id'] ?? '无名称密钥';
+                      }, (item) {
+                        return item['total_tokens'] ?? 0;
+                      }, theme, isDark),
+                    ),
+                  ],
+                ),
           const SizedBox(height: 28),
 
-          // Trend Chart (Simulated high-end custom layout)
+          // Trend Chart
           if (trends.isNotEmpty) ...[
             _buildTrendSection(trends, theme, isDark),
             const SizedBox(height: 28),
@@ -268,6 +306,8 @@ class _DashboardViewState extends State<DashboardView> {
       }
     }
 
+    final isMobile = MediaQuery.of(context).size.width < 768;
+
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
@@ -297,7 +337,7 @@ class _DashboardViewState extends State<DashboardView> {
                       Text(requests.toString(), style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
                       const SizedBox(height: 4),
                       Container(
-                        width: 32,
+                        width: isMobile ? 18.0 : 32.0,
                         height: 100 * heightRatio + 4,
                         decoration: BoxDecoration(
                           color: theme.colorScheme.primary.withOpacity(heightRatio > 0.1 ? heightRatio : 0.1),
@@ -349,75 +389,81 @@ class _DashboardViewState extends State<DashboardView> {
                 ),
               )
             else
-              Table(
-                columnWidths: const {
-                  0: FlexColumnWidth(2.5), // 时间
-                  1: FlexColumnWidth(2.5), // 密钥
-                  2: FlexColumnWidth(2),   // 映射模型
-                  3: FlexColumnWidth(1.2), // Prompt
-                  4: FlexColumnWidth(1.2), // Completion
-                  5: FlexColumnWidth(1.2), // Reasoning
-                  6: FlexColumnWidth(1.2), // 耗时
-                  7: FlexColumnWidth(1.2), // 状态
-                },
-                children: [
-                  TableRow(
-                    decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: isDark ? Colors.white12 : Colors.black12, width: 1)),
-                    ),
-                    children: const [
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("请求时间", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("网关密钥", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("中转模型", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("输入", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("输出", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("思考", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("耗时", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
-                      Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("状态", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: 800,
+                  child: Table(
+                    columnWidths: const {
+                      0: FlexColumnWidth(2.5), // 时间
+                      1: FlexColumnWidth(2.5), // 密钥
+                      2: FlexColumnWidth(2),   // 映射模型
+                      3: FlexColumnWidth(1.2), // Prompt
+                      4: FlexColumnWidth(1.2), // Completion
+                      5: FlexColumnWidth(1.2), // Reasoning
+                      6: FlexColumnWidth(1.2), // 耗时
+                      7: FlexColumnWidth(1.2), // 状态
+                    },
+                    children: [
+                      TableRow(
+                        decoration: BoxDecoration(
+                          border: Border(bottom: BorderSide(color: isDark ? Colors.white12 : Colors.black12, width: 1)),
+                        ),
+                        children: const [
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("请求时间", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("网关密钥", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("中转模型", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("输入", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("输出", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("思考", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("耗时", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Text("状态", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                        ],
+                      ),
+                      ...logs.map((logItem) {
+                        final String timeStr = logItem['created_at'] != null
+                            ? DateTime.parse(logItem['created_at']).toLocal().toString().substring(5, 19)
+                            : '-';
+                        final String keyName = logItem['api_key_name'] ?? '已删除密钥';
+                        final String modelName = logItem['model_name'] ?? '-';
+                        final int prompt = logItem['prompt_tokens'] ?? 0;
+                        final int completion = logItem['completion_tokens'] ?? 0;
+                        final int reasoning = logItem['reasoning_tokens'] ?? 0;
+                        final int duration = logItem['duration_ms'] ?? 0;
+                        final int code = logItem['status_code'] ?? 200;
+
+                        final isSuccess = code >= 200 && code < 400;
+
+                        return TableRow(
+                          decoration: BoxDecoration(
+                            border: Border(bottom: BorderSide(color: isDark ? Colors.white10 : Colors.black.withOpacity(0.04), width: 1)),
+                          ),
+                          children: [
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(timeStr, style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(keyName, style: const TextStyle(fontSize: 12))),
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(modelName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(prompt.toString(), style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(completion.toString(), style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(reasoning.toString(), style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: reasoning > 0 ? Colors.purpleAccent : null))),
+                            Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text("${duration}ms", style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(
+                                code.toString(),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontFamily: 'monospace',
+                                  color: isSuccess ? Colors.green : Colors.red,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
                     ],
                   ),
-                  ...logs.map((logItem) {
-                    final String timeStr = logItem['created_at'] != null
-                        ? DateTime.parse(logItem['created_at']).toLocal().toString().substring(5, 19)
-                        : '-';
-                    final String keyName = logItem['api_key_name'] ?? '已删除密钥';
-                    final String modelName = logItem['model_name'] ?? '-';
-                    final int prompt = logItem['prompt_tokens'] ?? 0;
-                    final int completion = logItem['completion_tokens'] ?? 0;
-                    final int reasoning = logItem['reasoning_tokens'] ?? 0;
-                    final int duration = logItem['duration_ms'] ?? 0;
-                    final int code = logItem['status_code'] ?? 200;
-
-                    final isSuccess = code >= 200 && code < 400;
-
-                    return TableRow(
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: isDark ? Colors.white10 : Colors.black.withOpacity(0.04), width: 1)),
-                      ),
-                      children: [
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(timeStr, style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(keyName, style: const TextStyle(fontSize: 12))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(modelName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(prompt.toString(), style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(completion.toString(), style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(reasoning.toString(), style: TextStyle(fontSize: 12, fontFamily: 'monospace', color: reasoning > 0 ? Colors.purpleAccent : null))),
-                        Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text("${duration}ms", style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Text(
-                            code.toString(),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontFamily: 'monospace',
-                              color: isSuccess ? Colors.green : Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  }),
-                ],
+                ),
               ),
           ],
         ),

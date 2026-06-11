@@ -32,15 +32,20 @@ class _DocsPageState extends State<DocsPage> {
         ? "${currentUri.scheme}://${currentUri.host}${currentUri.port != 80 && currentUri.port != 443 ? ':${currentUri.port}' : ''}"
         : ApiService.baseUrl;
 
+    final isMobile = MediaQuery.of(context).size.width < 768;
+
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            Icon(Icons.menu_book_outlined, color: theme.colorScheme.primary, size: 28),
-            const SizedBox(width: 12),
-            const Text(
-              "Relais 文档与中转服务中心",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Icon(Icons.menu_book_outlined, color: theme.colorScheme.primary, size: isMobile ? 24 : 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isMobile ? "Relais 文档" : "Relais 文档与中转服务中心",
+                style: TextStyle(fontSize: isMobile ? 16 : 18, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -68,52 +73,90 @@ class _DocsPageState extends State<DocsPage> {
               backgroundColor: theme.colorScheme.primary,
               foregroundColor: theme.colorScheme.onPrimary,
               elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
-          const SizedBox(width: 16),
+          SizedBox(width: isMobile ? 8 : 16),
         ],
       ),
+      bottomNavigationBar: isMobile && isLoggedIn
+          ? NavigationBar(
+              selectedIndex: _activeTab,
+              onDestinationSelected: (index) {
+                setState(() {
+                  _activeTab = index;
+                });
+              },
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.api_outlined),
+                  label: "API 中转",
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.download_for_offline_outlined),
+                  label: "镜像下载",
+                ),
+              ],
+            )
+          : null,
       body: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Sidebar Navigation
-            SizedBox(
-              width: 220,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isLoggedIn) ...[
-                    _buildSidebarButton(0, Icons.api_outlined, "API 中转服务"),
-                    const SizedBox(height: 12),
-                  ],
-                  _buildSidebarButton(1, Icons.download_for_offline_outlined, "镜像下载站"),
-                ],
-              ),
-            ),
-            const SizedBox(width: 40),
-            // Content Area
-            Expanded(
-              child: Card(
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 24,
+          vertical: isMobile ? 16 : 32,
+        ),
+        child: isMobile
+            ? Card(
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                   side: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(32.0),
+                  padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
                   child: SingleChildScrollView(
                     child: _activeTab == 0
                         ? _buildApiTransitDocs(theme, isDark, serverHost)
                         : _buildMirrorDocs(theme, isDark, serverHost),
                   ),
                 ),
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Sidebar Navigation
+                  SizedBox(
+                    width: 220,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (isLoggedIn) ...[
+                          _buildSidebarButton(0, Icons.api_outlined, "API 中转服务"),
+                          const SizedBox(height: 12),
+                        ],
+                        _buildSidebarButton(1, Icons.download_for_offline_outlined, "镜像下载站"),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 40),
+                  // Content Area
+                  Expanded(
+                    child: Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: isDark ? Colors.white12 : Colors.black12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(32.0),
+                        child: SingleChildScrollView(
+                          child: _activeTab == 0
+                              ? _buildApiTransitDocs(theme, isDark, serverHost)
+                              : _buildMirrorDocs(theme, isDark, serverHost),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -160,151 +160,249 @@ class _AdminPageState extends State<AdminPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final isMobile = MediaQuery.of(context).size.width < 768;
 
     final Uri? currentUri = Uri.tryParse(Uri.base.toString());
     final String serverHost = currentUri != null && currentUri.host.isNotEmpty
         ? "${currentUri.scheme}://${currentUri.host}${currentUri.port != 80 && currentUri.port != 443 ? ':${currentUri.port}' : ''}"
         : ApiService.baseUrl;
 
-    return Scaffold(
-      body: Row(
+    final Widget contentBody = Padding(
+      padding: EdgeInsets.all(isMobile ? 16.0 : 40.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // MD3 NavigationRail for dashboard navigation
-          NavigationRail(
-            selectedIndex: _activeTab,
-            onDestinationSelected: (index) {
-              setState(() {
-                _activeTab = index;
-              });
-            },
-            labelType: NavigationRailLabelType.all,
-            leading: Column(
-              children: [
-                const SizedBox(height: 16),
-                Icon(Icons.dashboard_customize, color: theme.colorScheme.primary, size: 28),
-                const SizedBox(height: 24),
-              ],
-            ),
-            trailing: Expanded(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 24.0),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: Icon(isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
-                        onPressed: () {
-                          ThemeController.toggleTheme();
-                          setState(() {});
-                        },
-                        tooltip: "切换主题",
-                      ),
-                      const SizedBox(height: 12),
-                      IconButton(
-                        icon: const Icon(Icons.menu_book_outlined, color: Colors.blueGrey),
-                        onPressed: () => Navigator.pushNamed(context, '/'),
-                        tooltip: "查看使用文档",
-                      ),
-                      const SizedBox(height: 12),
-                      IconButton(
-                        icon: const Icon(Icons.logout, color: Colors.redAccent),
-                        onPressed: () {
-                          ApiService.logout();
-                          Navigator.pushReplacementNamed(context, '/');
-                        },
-                        tooltip: "退出登录",
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.analytics_outlined),
-                selectedIcon: Icon(Icons.analytics),
-                label: Text("使用仪表盘"),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.hub_outlined),
-                selectedIcon: Icon(Icons.hub),
-                label: Text("模型映射"),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.key_outlined),
-                selectedIcon: Icon(Icons.key),
-                label: Text("网关密钥"),
-              ),
-            ],
-          ),
-
-          const VerticalDivider(thickness: 1, width: 1),
-
-          // Main Content Area
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(40.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _activeTab == 0
-                                ? "Token 统计与分析仪表盘"
-                                : _activeTab == 1
-                                    ? "AI 模型映射管理"
-                                    : "网关 API 密钥管理",
-                            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _activeTab == 0
-                                ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
-                                : _activeTab == 1
-                                    ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
-                                    : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
-                            style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 14),
-                          ),
-                        ],
-                      ),
-                      if (_activeTab != 0)
-                        FilledButton.icon(
+          // Header
+          isMobile
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _activeTab == 0
+                          ? "Token 统计与分析仪表盘"
+                          : _activeTab == 1
+                              ? "AI 模型映射管理"
+                              : "网关 API 密钥管理",
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _activeTab == 0
+                          ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
+                          : _activeTab == 1
+                              ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
+                              : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
+                      style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 13),
+                    ),
+                    if (_activeTab != 0) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
                           onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
                           icon: const Icon(Icons.add),
                           label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
                           style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 32),
+                  ],
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _activeTab == 0
+                              ? "Token 统计与分析仪表盘"
+                              : _activeTab == 1
+                                  ? "AI 模型映射管理"
+                                  : "网关 API 密钥管理",
+                          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _activeTab == 0
+                              ? "监控流量、Token 消耗以及大模型 API 转发的详细使用统计"
+                              : _activeTab == 1
+                                  ? "在此处配置中转到真实模型厂商的基础地址和参数映射"
+                                  : "生成专属中转密钥，配合 Base URL $serverHost/v1 访问 OpenAI 协议接口",
+                          style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 14),
+                        ),
+                      ],
+                    ),
+                    if (_activeTab != 0)
+                      FilledButton.icon(
+                        onPressed: _activeTab == 1 ? () => _showModelDialog() : _showKeyDialog,
+                        icon: const Icon(Icons.add),
+                        label: Text(_activeTab == 1 ? "新增模型" : "创建密钥"),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                  ],
+                ),
+          SizedBox(height: isMobile ? 20 : 32),
 
-                  // Content Body
-                  Expanded(
-                    child: _isLoading && _activeTab != 0
-                        ? const Center(child: CircularProgressIndicator())
-                        : _activeTab == 0
-                            ? const DashboardView()
-                            : _activeTab == 1
-                                ? _buildModelsView()
-                                : _buildKeysView(),
-                  ),
-                ],
-              ),
-            ),
+          // Content Body
+          Expanded(
+            child: _isLoading && _activeTab != 0
+                ? const Center(child: CircularProgressIndicator())
+                : _activeTab == 0
+                    ? const DashboardView()
+                    : _activeTab == 1
+                        ? _buildModelsView()
+                        : _buildKeysView(),
           ),
         ],
       ),
+    );
+
+    return Scaffold(
+      appBar: isMobile
+          ? AppBar(
+              title: const Text("Relais 管理", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              actions: [
+                IconButton(
+                  icon: Icon(isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+                  onPressed: () {
+                    ThemeController.toggleTheme();
+                    setState(() {});
+                  },
+                  tooltip: "切换主题",
+                ),
+                IconButton(
+                  icon: const Icon(Icons.menu_book_outlined, color: Colors.blueGrey),
+                  onPressed: () => Navigator.pushNamed(context, '/'),
+                  tooltip: "查看使用文档",
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout, color: Colors.redAccent),
+                  onPressed: () {
+                    ApiService.logout();
+                    Navigator.pushReplacementNamed(context, '/');
+                  },
+                  tooltip: "退出登录",
+                ),
+              ],
+            )
+          : null,
+      bottomNavigationBar: isMobile
+          ? NavigationBar(
+              selectedIndex: _activeTab,
+              onDestinationSelected: (index) {
+                setState(() {
+                  _activeTab = index;
+                });
+              },
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.analytics_outlined),
+                  selectedIcon: Icon(Icons.analytics),
+                  label: "仪表盘",
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.hub_outlined),
+                  selectedIcon: Icon(Icons.hub),
+                  label: "模型映射",
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.key_outlined),
+                  selectedIcon: Icon(Icons.key),
+                  label: "网关密钥",
+                ),
+              ],
+            )
+          : null,
+      body: isMobile
+          ? contentBody
+          : Row(
+              children: [
+                // MD3 NavigationRail for dashboard navigation
+                NavigationRail(
+                  selectedIndex: _activeTab,
+                  onDestinationSelected: (index) {
+                    setState(() {
+                      _activeTab = index;
+                    });
+                  },
+                  labelType: NavigationRailLabelType.all,
+                  leading: Column(
+                    children: [
+                      const SizedBox(height: 16),
+                      Icon(Icons.dashboard_customize, color: theme.colorScheme.primary, size: 28),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
+                  trailing: Expanded(
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 24.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: Icon(isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined),
+                              onPressed: () {
+                                ThemeController.toggleTheme();
+                                setState(() {});
+                              },
+                              tooltip: "切换主题",
+                            ),
+                            const SizedBox(height: 12),
+                            IconButton(
+                              icon: const Icon(Icons.menu_book_outlined, color: Colors.blueGrey),
+                              onPressed: () => Navigator.pushNamed(context, '/'),
+                              tooltip: "查看使用文档",
+                            ),
+                            const SizedBox(height: 12),
+                            IconButton(
+                              icon: const Icon(Icons.logout, color: Colors.redAccent),
+                              onPressed: () {
+                                ApiService.logout();
+                                Navigator.pushReplacementNamed(context, '/');
+                              },
+                              tooltip: "退出登录",
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  destinations: const [
+                    NavigationRailDestination(
+                      icon: Icon(Icons.analytics_outlined),
+                      selectedIcon: Icon(Icons.analytics),
+                      label: Text("使用仪表盘"),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.hub_outlined),
+                      selectedIcon: Icon(Icons.hub),
+                      label: Text("模型映射"),
+                    ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.key_outlined),
+                      selectedIcon: Icon(Icons.key),
+                      label: Text("网关密钥"),
+                    ),
+                  ],
+                ),
+
+                const VerticalDivider(thickness: 1, width: 1),
+
+                // Main Content Area
+                Expanded(
+                  child: contentBody,
+                ),
+              ],
+            ),
     );
   }
 
