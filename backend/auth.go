@@ -37,10 +37,10 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// Password matches, generate JWT token valid for 24 hours
+	// Password matches, generate JWT token valid for 30 days
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"authorized": true,
-		"exp":        time.Now().Add(24 * time.Hour).Unix(),
+		"exp":        time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(jwtSecret)
