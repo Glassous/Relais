@@ -1237,24 +1237,26 @@ class _RssArticleDetailPageState extends State<RssArticleDetailPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_isViewRegistered) {
-      final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
-      _art = args;
-      _viewId = 'iframe_proxy_${_art!['id']}';
-      
-      final proxyUrl = "${ApiService.baseUrl}/api/admin/rss/proxy-url?url=${Uri.encodeComponent(_art!['url'] ?? '')}";
-      
-      ui_web.platformViewRegistry.registerViewFactory(
-        _viewId!,
-        (int viewId) {
-          final iframe = web.document.createElement('iframe') as web.HTMLIFrameElement;
-          iframe.src = proxyUrl;
-          iframe.style.border = 'none';
-          iframe.style.width = '100%';
-          iframe.style.height = '100%';
-          return iframe;
-        },
-      );
-      _isViewRegistered = true;
+      final args = ModalRoute.of(context)?.settings.arguments;
+      if (args is Map) {
+        _art = Map<String, dynamic>.from(args);
+        _viewId = 'iframe_proxy_${_art!['id']}';
+        
+        final proxyUrl = "${ApiService.baseUrl}/api/admin/rss/proxy-url?url=${Uri.encodeComponent(_art!['url'] ?? '')}&token=${ApiService.token}";
+        
+        ui_web.platformViewRegistry.registerViewFactory(
+          _viewId!,
+          (int viewId) {
+            final iframe = web.document.createElement('iframe') as web.HTMLIFrameElement;
+            iframe.src = proxyUrl;
+            iframe.style.border = 'none';
+            iframe.style.width = '100%';
+            iframe.style.height = '100%';
+            return iframe;
+          },
+        );
+        _isViewRegistered = true;
+      }
     }
   }
 
