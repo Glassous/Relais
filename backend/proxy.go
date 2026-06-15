@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -64,6 +66,110 @@ func logTokenUsage(apiKeyID, apiKeyName, modelName string, promptTokens, complet
 	if err != nil {
 		log.Printf("Failed to insert token log: %v", err)
 	}
+}
+
+func generateChatID() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "chatcmpl-unknown"
+	}
+	return "chatcmpl-" + hex.EncodeToString(b)
+}
+
+func normalizeNonStreamResponse(respMap map[string]interface{}, customModelName string) map[string]interface{} {
+	if _, ok := respMap["id"]; !ok {
+		respMap["id"] = generateChatID()
+	}
+	respMap["object"] = "chat.completion"
+	if created, ok := respMap["created"].(float64); !ok || created == 0 {
+		respMap["created"] = time.Now().Unix()
+	}
+	respMap["model"] = customModelName
+
+	choices, ok := respMap["choices"].([]interface{})
+	if !ok {
+		choices = []interface{}{}
+		respMap["choices"] = choices
+	}
+	for i, c := range choices {
+		choice, ok := c.(map[string]interface{})
+		if !ok {
+			choice = make(map[string]interface{})
+			choices[i] = choice
+		}
+		if _, hasIdx := choice["index"]; !hasIdx {
+			choice["index"] = i
+		}
+		msg, msgOk := choice["message"].(map[string]interface{})
+		if !msgOk {
+			msg = make(map[string]interface{})
+			choice["message"] = msg
+		}
+		if _, hasRole := msg["role"]; !hasRole {
+			msg["role"] = "assistant"
+		}
+		if _, hasContent := msg["content"]; !hasContent {
+			msg["content"] = ""
+		}
+		if _, hasLogprobs := choice["logprobs"]; !hasLogprobs {
+			choice["logprobs"] = nil
+		}
+		if _, hasFinish := choice["finish_reason"]; !hasFinish {
+			choice["finish_reason"] = "stop"
+		}
+	}
+
+	if usage, ok := respMap["usage"].(map[string]interface{}); ok {
+		if _, ok := usage["prompt_tokens"]; !ok {
+			usage["prompt_tokens"] = 0
+		}
+		if _, ok := usage["completion_tokens"]; !ok {
+			usage["completion_tokens"] = 0
+		}
+		if _, ok := usage["total_tokens"]; !ok {
+			pt, _ := usage["prompt_tokens"].(float64)
+			ct, _ := usage["completion_tokens"].(float64)
+			usage["total_tokens"] = pt + ct
+		}
+	}
+
+	return respMap
+}
+
+func normalizeStreamChunk(chunk map[string]interface{}, customModelName string) map[string]interface{} {
+	if _, ok := chunk["id"]; !ok {
+		chunk["id"] = generateChatID()
+	}
+	chunk["object"] = "chat.completion.chunk"
+	if created, ok := chunk["created"].(float64); !ok || created == 0 {
+		chunk["created"] = time.Now().Unix()
+	}
+	chunk["model"] = customModelName
+
+	if choices, ok := chunk["choices"].([]interface{}); ok {
+		for i, c := range choices {
+			choice, ok := c.(map[string]interface{})
+			if !ok {
+				choice = make(map[string]interface{})
+				choices[i] = choice
+			}
+			if _, hasIdx := choice["index"]; !hasIdx {
+				choice["index"] = i
+			}
+			delta, deltaOk := choice["delta"].(map[string]interface{})
+			if !deltaOk {
+				delta = make(map[string]interface{})
+				choice["delta"] = delta
+			}
+			if _, hasLogprobs := choice["logprobs"]; !hasLogprobs {
+				choice["logprobs"] = nil
+			}
+		}
+	} else {
+		chunk["choices"] = []interface{}{}
+	}
+
+	return chunk
 }
 
 // ProxyHandler proxies the OpenAI requests
@@ -198,21 +304,25 @@ func forwardRequest(c *gin.Context, apiKey WorkspaceApiKey, targetModel AIModel,
 	if isStream && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		var contentChars, reasoningChars int
 		var hasUsage bool
+		shouldNormalize := targetModel.ResponseFormat == "openai"
 
 		reader := bufio.NewReader(resp.Body)
 		for {
 			lineBytes, readErr := reader.ReadBytes('\n')
 			if len(lineBytes) > 0 {
-				_, _ = c.Writer.Write(lineBytes)
-
 				line := string(lineBytes)
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "data: ") {
-					dataStr := strings.TrimPrefix(line, "data: ")
-					if dataStr != "[DONE]" {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "data: ") {
+					dataStr := strings.TrimPrefix(trimmed, "data: ")
+					if dataStr == "[DONE]" {
+						_, _ = c.Writer.Write(lineBytes)
+					} else {
 						var chunk map[string]interface{}
 						if err := json.Unmarshal([]byte(dataStr), &chunk); err == nil {
-							// Check for usage in chunk
+							if shouldNormalize {
+								chunk = normalizeStreamChunk(chunk, targetModel.CustomName)
+							}
+
 							if usage, ok := chunk["usage"].(map[string]interface{}); ok {
 								hasUsage = true
 								if pt, ok := usage["prompt_tokens"].(float64); ok {
@@ -230,7 +340,6 @@ func forwardRequest(c *gin.Context, apiKey WorkspaceApiKey, targetModel AIModel,
 								}
 							}
 
-							// Fallback character count
 							if choices, ok := chunk["choices"].([]interface{}); ok && len(choices) > 0 {
 								if choice, ok := choices[0].(map[string]interface{}); ok {
 									if delta, ok := choice["delta"].(map[string]interface{}); ok {
@@ -243,9 +352,17 @@ func forwardRequest(c *gin.Context, apiKey WorkspaceApiKey, targetModel AIModel,
 									}
 								}
 							}
+
+							normalizedData, _ := json.Marshal(chunk)
+							c.Writer.WriteString("data: " + string(normalizedData) + "\n\n")
+						} else {
+							_, _ = c.Writer.Write(lineBytes)
 						}
 					}
+				} else {
+					_, _ = c.Writer.Write(lineBytes)
 				}
+				c.Writer.Flush()
 			}
 			if readErr != nil {
 				break
@@ -262,10 +379,17 @@ func forwardRequest(c *gin.Context, apiKey WorkspaceApiKey, targetModel AIModel,
 		// Non-streaming response
 		respBytes, readErr := io.ReadAll(resp.Body)
 		if readErr == nil {
-			_, _ = c.Writer.Write(respBytes)
+			shouldNormalize := targetModel.ResponseFormat == "openai"
 
 			var respMap map[string]interface{}
 			if err := json.Unmarshal(respBytes, &respMap); err == nil {
+				if shouldNormalize {
+					respMap = normalizeNonStreamResponse(respMap, targetModel.CustomName)
+				}
+
+				normalizedBytes, _ := json.Marshal(respMap)
+				_, _ = c.Writer.Write(normalizedBytes)
+
 				var hasUsage bool
 				if usage, ok := respMap["usage"].(map[string]interface{}); ok {
 					hasUsage = true
@@ -300,6 +424,8 @@ func forwardRequest(c *gin.Context, apiKey WorkspaceApiKey, targetModel AIModel,
 						}
 					}
 				}
+			} else {
+				_, _ = c.Writer.Write(respBytes)
 			}
 		}
 	}

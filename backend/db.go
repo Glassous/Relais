@@ -39,6 +39,7 @@ type AIModel struct {
 	ProviderBaseURL  string    `bson:"provider_base_url" json:"provider_base_url"`   // e.g. https://api.openai.com
 	ProviderAPIKey   string    `bson:"provider_api_key" json:"provider_api_key"`     // e.g. sk-xxxx
 	ProviderModel    string    `bson:"provider_model" json:"provider_model"`         // Real provider model e.g. gpt-4o
+	ResponseFormat   string    `bson:"response_format" json:"response_format"`       // "openai" for normalized format, empty for passthrough
 	CreatedAt        time.Time `bson:"created_at" json:"created_at"`
 }
 

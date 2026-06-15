@@ -83,6 +83,7 @@ func UpdateModel(c *gin.Context) {
 			"provider_base_url": model.ProviderBaseURL,
 			"provider_api_key":  model.ProviderAPIKey,
 			"provider_model":    model.ProviderModel,
+			"response_format":   model.ResponseFormat,
 		},
 	}
 
